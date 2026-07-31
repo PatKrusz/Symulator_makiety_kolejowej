@@ -1,0 +1,88 @@
+{
+  "ustawienia_symulacji": {
+    "rozmiar_kafelka_px": 48,
+    "skala_w_metrach": 10.0,
+    "wspolczynnik_czasu": 1.0,
+    "tryb_debugowania": true
+  },
+  "pociagi": [
+    {
+      "id": "P01",
+      "typ": "POSPIESZNY",
+      "max_predkosc_kmh": 120.0,
+      "przyspieszenie_bazowe": 0.45,
+      "hamowanie_bazowe": 0.70,
+      "masa": 1.0,
+      "pozycja_startowa": { "x": 1, "y": 2 },
+      "rozklad": [
+        { "id_stacji": "ST01", "przyjazd": "10:05:00", "odjazd": "10:07:00" },
+        { "id_stacji": "ST02", "przyjazd": "10:15:00", "odjazd": "10:16:00" }
+      ]
+    },
+    {
+      "id": "T01",
+      "typ": "TOWAROWY",
+      "max_predkosc_kmh": 80.0,
+      "przyspieszenie_bazowe": 0.20,
+      "hamowanie_bazowe": 0.35,
+      "masa": 2.5,
+      "pozycja_startowa": { "x": 1, "y": 4 },
+      "rozklad": [
+        { "id_stacji": "ST01", "przyjazd": "10:02:00", "odjazd": "10:10:00" }
+      ]
+    }
+  ],
+    "stacje": [
+        {
+        "id": "ST01",
+        "nazwa": "Wejherowo",
+        "pozycja": { "x": 5, "y": 2 },
+        "typ": "PASAZERSKA"
+        },
+        {
+        "id": "ST02",
+        "nazwa": "Reda",
+        "pozycja": { "x": 10, "y": 2 },
+        "typ": "PASAZERSKA"
+        }
+    ],
+    "tory": [
+        {
+        "id": "T01",
+        "punkty": [
+            { "x": 1, "y": 2 },
+            { "x": 5, "y": 2 },
+            { "x": 10, "y": 2 }
+        ]
+        },
+        {
+        "id": "T02",
+        "punkty": [
+            { "x": 1, "y": 4 },
+            { "x": 5, "y": 4 },
+            { "x": 10, "y": 4 }
+        ]
+        }
+    ],
+    "semafory": [
+        {
+        "id": "S01",
+        "pozycja": { "x": 5, "y": 2 },
+        "typ": "semafor",
+        "stan_poczatkowy": "zielony"
+        },
+        {
+        "id": "S02",
+        "pozycja": { "x": 10, "y": 2 },
+        "typ": "semafor",
+        "stan_poczatkowy": "czerwony"
+        }
+    ],
+    "zwrotnice": [
+        {
+        "id": "R01",
+        "pozycja": { "x": 5, "y": 2 },
+        "stan_poczatkowy": "prosto"
+        }
+    ]
+}
