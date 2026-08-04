@@ -5,69 +5,97 @@
     "wspolczynnik_czasu": 1.0,
     "tryb_debugowania": true
   },
+  "tory": [],
+  "stacje": [],
+  "semafory": [],
+  "zwrotnice": [],
+  "pociagi": [
+    {
+      "id": "P01",
+      "typ": "OSOBOWY",
+      "max_predkosc_kmh": 30.0,
+      "przyspieszenie_bazowe": 0.8,
+      "hamowanie_bazowe": 0.8,
+      "masa": 1,
+      "dlugosc": 2,
+      "pozycja_startowa": { "x": 1, "y": 3 },
+      "rozklad": [
+        { "id_stacji": "ST01", "przyjazd": "10:01:00", "odjazd": "10:02:00" }
+      ]
+    }
+  ],
   "infrastruktura": {
-    "tory": [
-      {
-        "id": "T01",
-        "typ": "PROSTY",
-        "x_siatka": 1,
-        "y_siatka": 2,
-        "polaczenia": {
-          "ZACHOD": { "id_celu": "T02", "wejscie_celu": "ZACHOD" }
-        }
-      },
-      {
-        "id": "T02",
-        "typ": "STRAIGHT",
-        "x_siatka": 2,
-        "y_siatka": 2,
-        "polaczenia": {
-          "ZACHOD": { "id_celu": "Z01", "wejscie_celu": "ZACHOD" },
-          "WSCHOD": { "id_celu": "T01", "wejscie_celu": "WSCHOD" }
-        }
-      }
+    "wezly": [
+      { "id": "T01", "x": 1, "y": 3, "polaczenia": { "ZACHOD": { "id_cel": "T02", "kierunek_wejscia_cel": "ZACHOD" } } },
+      { "id": "T02", "x": 2, "y": 3, "polaczenia": { "ZACHOD": { "id_cel": "T03", "kierunek_wejscia_cel": "ZACHOD" } } },
+      { "id": "T03", "x": 3, "y": 3, "polaczenia": { "ZACHOD": { "id_cel": "T04", "kierunek_wejscia_cel": "ZACHOD" } } },
+      { "id": "T04", "x": 4, "y": 3, "polaczenia": { "ZACHOD": { "id_cel": "T05", "kierunek_wejscia_cel": "ZACHOD" } } },
+      { "id": "T05", "x": 5, "y": 3, "polaczenia": { "ZACHOD": { "id_cel": "T06", "kierunek_wejscia_cel": "ZACHOD" } } },
+      { "id": "T06", "x": 6, "y": 3, "polaczenia": { "ZACHOD": { "id_cel": "T07", "kierunek_wejscia_cel": "ZACHOD" } } },
+
+      { "id": "T08", "x": 8, "y": 3, "polaczenia": { "ZACHOD": { "id_cel": "T09", "kierunek_wejscia_cel": "ZACHOD" } } },
+      { "id": "T09", "x": 9, "y": 3, "polaczenia": { "ZACHOD": { "id_cel": "T10", "kierunek_wejscia_cel": "ZACHOD" } } },
+      { "id": "T10", "x": 10, "y": 3, "polaczenia": { "ZACHOD": { "id_cel": "T11", "kierunek_wejscia_cel": "ZACHOD" } } },
+      { "id": "T11", "x": 11, "y": 3, "polaczenia": { "ZACHOD": { "id_cel": "T12", "kierunek_wejscia_cel": "ZACHOD" } } },
+      { "id": "T12", "x": 12, "y": 3, "polaczenia": { "ZACHOD": { "id_cel": "T13", "kierunek_wejscia_cel": "ZACHOD" } } },
+      { "id": "T13", "x": 13, "y": 3, "polaczenia": { "ZACHOD": { "id_cel": "T14", "kierunek_wejscia_cel": "ZACHOD" } } },
+      { "id": "T14", "x": 14, "y": 3, "polaczenia": { "ZACHOD": { "id_cel": "T15", "kierunek_wejscia_cel": "ZACHOD" } } },
+      { "id": "T15", "x": 15, "y": 3, "polaczenia": { "ZACHOD": { "id_cel": "T16", "kierunek_wejscia_cel": "ZACHOD" } } },
+      { "id": "T17", "x": 17, "y": 3, "polaczenia": {} },
+
+      { "id": "T08_B", "x": 8, "y": 4, "polaczenia": { "POLUDNIE_ZACHOD": { "id_cel": "T09_B", "kierunek_wejscia_cel": "ZACHOD" } } },
+      { "id": "T09_B", "x": 9, "y": 4, "polaczenia": { "ZACHOD": { "id_cel": "T10_B", "kierunek_wejscia_cel": "ZACHOD" } } },
+      { "id": "T10_B", "x": 10, "y": 4, "polaczenia": { "ZACHOD": { "id_cel": "T11_B", "kierunek_wejscia_cel": "ZACHOD" } } },
+      { "id": "T11_B", "x": 11, "y": 4, "polaczenia": { "ZACHOD": { "id_cel": "T12_B", "kierunek_wejscia_cel": "ZACHOD" } } },
+      { "id": "T12_B", "x": 12, "y": 4, "polaczenia": { "ZACHOD": { "id_cel": "T13_B", "kierunek_wejscia_cel": "ZACHOD" } } },
+      { "id": "T13_B", "x": 13, "y": 4, "polaczenia": { "ZACHOD": { "id_cel": "T14_B", "kierunek_wejscia_cel": "ZACHOD" } } },
+      { "id": "T14_B", "x": 14, "y": 4, "polaczenia": { "ZACHOD": { "id_cel": "T15_B", "kierunek_wejscia_cel": "ZACHOD" } } },
+      { "id": "T15_B", "x": 15, "y": 4, "polaczenia": { "ZACHOD": { "id_cel": "T16", "kierunek_wejscia_cel": "POLNOC_ZACHOD" } } }
     ],
     "zwrotnice": [
       {
-        "id": "Z01",
-        "x_siatka": 3,
-        "y_siatka": 2,
+        "id": "T07",
+        "x": 7,
+        "y": 3,
         "polaczenia_plus": {
-          "ZACHOD": { "id_celu": "T03", "wejscie_celu": "ZACHOD" }
+          "ZACHOD": { "id_cel": "T08", "kierunek_wejscia_cel": "ZACHOD" }
         },
         "polaczenia_minus": {
-          "WSCHOD": { "id_celu": "T04", "wejscie_celu": "WSCHOD" }
+          "ZACHOD": { "id_cel": "T08_B", "kierunek_wejscia_cel": "POLUDNIE_ZACHOD" }
+        }
+      },
+      {
+        "id": "T16",
+        "x": 16,
+        "y": 3,
+        "polaczenia_plus": {
+          "ZACHOD": { "id_cel": "T17", "kierunek_wejscia_cel": "ZACHOD" }
+        },
+        "polaczenia_minus": {
+          "POLNOC_ZACHOD": { "id_cel": "T17", "kierunek_wejscia_cel": "ZACHOD" }
         }
       }
     ],
     "semafory": [
       {
         "id": "S01",
-        "id_toru": "T02",
+        "id_toru": "T15",
         "kierunek_semafora": "ZACHOD",
         "domyslny_stan": "CZERWONY"
+      },
+      {
+        "id": "S02",
+        "id_toru": "T07",
+        "kierunek_semafora": "ZACHOD",
+        "domyslny_stan": "ZOLTY"
       }
     ],
     "stacje": [
       {
         "id": "ST01",
         "nazwa": "Stacja Główna",
-        "id_torow": ["T01", "T02"]
+        "id_torow": ["T11", "T12", "T13", "T14"]
       }
     ]
-  },
-  "pociagi": [
-    {
-      "id": "P01",
-      "typ": "POSPIESZNY",
-      "max_predkosc_kmh": 120.0,
-      "przyspieszenie_bazowe": 0.45,
-      "hamowanie_bazowe": 0.70,
-      "masa": 1.0,
-      "pozycja_startowa": { "x": 1, "y": 2 },
-      "rozklad": [
-        { "id_stacji": "ST01", "przyjazd": "10:05:00", "odjazd": "10:07:00" }
-      ]
-    }
-  ]
+  }
 }

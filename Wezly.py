@@ -1,9 +1,8 @@
+# Infrastruktura i graf szlakowy
+
 from enum import Enum
 from typing import Dict, Optional, Tuple, List
-
-global DEBUG_MODE
-
-# Infrastruktura i graf szlakowy
+import config
 
 class Sygnal(Enum):
     CZERWONY = "CZERWONY"
@@ -20,6 +19,10 @@ class Kierunek(Enum):
     POLUDNIE = "POLUDNIE"
     WSCHOD = "WSCHOD"
     ZACHOD = "ZACHOD"
+    POLNOC_WSCHOD = "POLNOC_WSCHOD"
+    POLNOC_ZACHOD = "POLNOC_ZACHOD"
+    POLUDNIE_WSCHOD = "POLUDNIE_WSCHOD"
+    POLUDNIE_ZACHOD = "POLUDNIE_ZACHOD"
 
 class WezelGrafu:
     """ Podstawowa klasa węzła grafu reprezentująca pojedynczy kafelek toru"""
@@ -38,7 +41,7 @@ class WezelGrafu:
     def dodaj_polaczenie(self, kierunek_wejscia: Kierunek, id_cel: str, kierunek_wejscia_cel: Kierunek) -> None:
         """Dodaje połączenie do sąsiedniego węzła grafu."""
         self.polaczenia[kierunek_wejscia] = (id_cel, kierunek_wejscia_cel)
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             print(f"[DEBUG] Dodano połączenie węzła '{self.id_wezel}': {kierunek_wejscia} -> {id_cel} ({kierunek_wejscia_cel})")
 
     def nastepny_wezel(self, kierunek_wejscia: Kierunek) -> Optional[Tuple[str, Kierunek]]:
@@ -58,12 +61,12 @@ class WezelZwrotnicy(WezelGrafu):
     def ustaw_pozycje(self, nowa_pozycja: Zwrot, wymuszenie: bool = False) -> bool:
         """Ustawia pozycję zwrotnicy. Jeśli wymuszenie jest True, ignoruje blokadę. Zwraca True jeśli ustawienie się powiodło, False jeśli nie (np. z powodu blokady)."""
         if self.blokada and not wymuszenie:
-            if DEBUG_MODE:
+            if config.DEBUG_MODE:
                 print(f"[DEBUG] Próba ustawienia zwrotnicy '{self.id_wezel}' na {nowa_pozycja}, ale jest zablokowana.")
             return False  # Nie można zmienić ustawienia, zwrotnica jest zablokowana
 
         self.pozycja = nowa_pozycja
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             print(f"[DEBUG] Zwrotnica '{self.id_wezel}' ustawiona na {self.pozycja.value}.")
         return True
 
@@ -85,7 +88,7 @@ class WezelSemafora:
     def ustaw_sygnal(self, nowy_sygnal: Sygnal) -> None:
         """Ustawia sygnał semafora na nowy sygnał."""
         self.sygnal = nowy_sygnal
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             print(f"[DEBUG] Semafor '{self.id_semafora}' ustawiony na sygnał: {self.sygnal.value}")
 
 class ObszarStacji:

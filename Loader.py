@@ -1,9 +1,10 @@
+# Wczytywanie ustawień symulatora z pliku konfiguracyjnego
+
 import json
 import os
 
-global DEBUG_MODE
+import config
 
-# Wczytywanie ustawień symulatora z pliku konfiguracyjnego
 class Skaler:
     """
     Klasa odpowiedzialna za skalowanie wartości w symulatorze.
@@ -12,14 +13,14 @@ class Skaler:
         self.skala_w_metrach = skala_w_metrach
         self.rozmiar_kafelka_px = rozmiar_kafelka_px
         self.px_na_metr = self.rozmiar_kafelka_px / self.skala_w_metrach
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             print(f"[DEBUG] Inicjalizacja Scalera: skala_w_metrach={self.skala_w_metrach}, rozmiar_kafelka_px={self.rozmiar_kafelka_px}, px_na_metr={self.px_na_metr}")
 
     def kmh_na_pxs(self, predkosc_kmh: float) -> float:
         """Konwertuje prędkość z km/h na piksele na sekundę."""
         predkosc_ms = predkosc_kmh * 1000 / 3600  # km/h -> m/s
         predkosc_pxs = predkosc_ms * self.px_na_metr  # m/s -> px/s
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             print(f"[DEBUG] Konwersja prędkości: {predkosc_kmh} km/h -> {predkosc_pxs} px/s")
         return predkosc_pxs
 
@@ -27,21 +28,21 @@ class Skaler:
         """Konwertuje prędkość z pikseli na sekundę na km/h."""
         predkosc_ms = predkosc_pxs / self.px_na_metr  # px/s -> m/s
         predkosc_kmh = predkosc_ms * 3600 / 1000  # m/s -> km/h
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             print(f"[DEBUG] Konwersja prędkości: {predkosc_pxs} px/s -> {predkosc_kmh} km/h")
         return predkosc_kmh
 
     def ms2_na_pxs2(self, przyspieszenie_ms2: float) -> float:
         """Konwertuje przyspieszenie z m/s² na px/s²."""
         przyspieszenie_pxs2 = przyspieszenie_ms2 * self.px_na_metr  # m/s² -> px/s²
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             print(f"[DEBUG] Konwersja przyspieszenia: {przyspieszenie_ms2} m/s² -> {przyspieszenie_pxs2} px/s²")
         return przyspieszenie_pxs2
 
     def pxs2_na_ms2(self, przyspieszenie_pxs2: float) -> float:
         """Konwertuje przyspieszenie z px/s² na m/s²."""
         przyspieszenie_ms2 = przyspieszenie_pxs2 / self.px_na_metr  # px/s² -> m/s²
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             print(f"[DEBUG] Konwersja przyspieszenia: {przyspieszenie_pxs2} px/s² -> {przyspieszenie_ms2} m/s²")
         return przyspieszenie_ms2
 
@@ -49,8 +50,8 @@ class Skaler:
         """Konwertuje współrzędne kafelka w siatce na środkowy punkt w pikselach"""
         x_px = (x_siatka + 0.5) * self.rozmiar_kafelka_px
         y_px = (y_siatka + 0.5) * self.rozmiar_kafelka_px
-        if DEBUG_MODE:
-            print(f"[DEBUG] Konwersja współrzędnych: ({x_siatka}, {y_siatka}) -> ({x_px}, {y_px}) px")
+        #if config.DEBUG_MODE:
+         #   print(f"[DEBUG] Konwersja współrzędnych: ({x_siatka}, {y_siatka}) -> ({x_px}, {y_px}) px")
         return x_px, y_px
 
 
@@ -80,16 +81,15 @@ class ConfigLoader:
         with open(self.sciezka_konfiguracji, 'r', encoding='utf-8') as f:
             try:
                 self.surowe_dane = json.load(f)
-                global DEBUG_MODE
-                DEBUG_MODE = self.surowe_dane.get("ustawienia_symulacji", {}).get("tryb_debugowania", False)
-                if DEBUG_MODE:
+                config.DEBUG_MODE = self.surowe_dane.get("ustawienia_symulacji", {}).get("tryb_debugowania", False)
+                if config.DEBUG_MODE:
                     print(f"[DEBUG] Wczytano konfigurację: {self.surowe_dane}")
             except json.JSONDecodeError as e:
                 print(f"[ERROR] Błąd dekodowania JSON: {e}")
                 return False
 
         # Sprawdzenie obecności wymaganych sekcji
-        for sekcja in ["ustawienia_symulacji", "pociagi", "stacje", "semafory", "zwrotnice", "tory"]:
+        for sekcja in ["ustawienia_symulacji", "pociagi", "infrastruktura"]:
             if sekcja not in self.surowe_dane:
                 print(f"[ERROR] Brak sekcji '{sekcja}' w pliku konfiguracyjnym.")
                 return False

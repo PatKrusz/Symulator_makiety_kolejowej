@@ -1,9 +1,9 @@
+# Zegar symulacji
+
 import datetime
 from typing import Callable
+import config
 
-global DEBUG_MODE
-
-# Zegar symulacji
 class Wydarzenie:
     """
     Klasa reprezentuje pojedyncze wydarzenie w symulacji zaplanowane na konkretny czas symulacji
@@ -31,28 +31,28 @@ class ZegarSymulacji:
     def ustaw_wspolczynnik_czasu(self, wspolczynnik: float) -> None:
         """Ustawia współczynnik przyspieszenia czasu symulacji."""
         self.wspolczynnik_czasu = wspolczynnik
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             print(f"[DEBUG] Ustawiono współczynnik czasu na: {self.wspolczynnik_czasu}")
 
     def przelacz_pauze(self) -> bool:
         """Przełącza stan pauzy symulacji."""
         self.pauza = not self.pauza
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             print(f"[DEBUG] Pauza symulacji: {'Włączona' if self.pauza else 'Wyłączona'}")
         return self.pauza
 
     def aktualizuj_czas(self, delta_czasu_rzeczywistego: float) -> float:
         """Aktualizuje czas symulacji na podstawie upływu czasu rzeczywistego i współczynnika przyspieszenia."""
         if self.pauza:
-            if DEBUG_MODE:
-                print("[DEBUG] Symulacja w pauzie, czas nie jest aktualizowany.")
+            #if config.DEBUG_MODE:
+            #    print("[DEBUG] Symulacja w pauzie, czas nie jest aktualizowany.")
             return 0.0
 
         delta_czasu_symulacji = delta_czasu_rzeczywistego * self.wspolczynnik_czasu
         self.czas_symulacji += datetime.timedelta(seconds=delta_czasu_symulacji)
 
-        if DEBUG_MODE:
-            print(f"[DEBUG] Aktualizacja czasu symulacji: +{delta_czasu_symulacji:.2f}s, nowy czas: {self.czas_symulacji.time()}")
+        #if config.DEBUG_MODE:
+        #    print(f"[DEBUG] Aktualizacja czasu symulacji: +{delta_czasu_symulacji:.2f}s, nowy czas: {self.czas_symulacji.time()}")
 
         self._wykonaj_wydarzenia()
         return delta_czasu_symulacji
@@ -66,7 +66,7 @@ class ZegarSymulacji:
         """Wykonuje wszystkie wydarzenia, których czas symulacji został osiągnięty lub przekroczony."""
         for wydarzenie in self._zaplanowane_wydarzenia:
             if not wydarzenie.wykonane and self.czas_symulacji >= wydarzenie.czas_symulacji:
-                if DEBUG_MODE:
+                if config.DEBUG_MODE:
                     print(f"[DEBUG] Wykonywanie wydarzenia: {wydarzenie.nazwa} o czasie symulacji: {wydarzenie.czas_symulacji.time()}")
                 try:
                     wydarzenie.akcja()

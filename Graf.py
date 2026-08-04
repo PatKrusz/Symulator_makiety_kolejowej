@@ -1,9 +1,8 @@
-# menedżer grafu szlaku
+# Menedżer grafu szlaku
 
 from typing import Dict, Optional, Tuple
+import config
 from Wezly import WezelGrafu, WezelZwrotnicy, WezelSemafora, ObszarStacji, Kierunek, Sygnal
-
-global DEBUG_MODE
 
 class MenedzerGrafu:
     """
@@ -70,7 +69,7 @@ class MenedzerGrafu:
             stacja = ObszarStacji(stacja_dane["id"], stacja_dane["nazwa"], stacja_dane["id_torow"])
             self.dodaj_stacje(stacja)
 
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             print(f"[DEBUG] Załadowano infrastrukturę: {len(self.wezly)} węzłów, {len(self.zwrotnice)} zwrotnic, {len(self.semafory)} semaforów, {len(self.stacje)} stacji.")
 
     def znajdz_wolna_przestrzen(self, id_punktu_poczatkowego: str, kierunek_nadjezdzania: Kierunek, max_liczba_krokow: int = 20) -> Tuple[int, Optional[str]]:
@@ -79,7 +78,7 @@ class MenedzerGrafu:
         Zwraca krotkę (liczba_wolnych_kafelkow, powod_zatrzymania). Jeśli nie znaleziono wolnego kafelka, zwraca (0, None).
         """
         if id_punktu_poczatkowego not in self.wezly:
-            if DEBUG_MODE:
+            if config.DEBUG_MODE:
                 print(f"[DEBUG] Punkt początkowy '{id_punktu_poczatkowego}' nie istnieje w grafie.")
             return 0, "punkt_nie_istnieje"
 
@@ -92,21 +91,21 @@ class MenedzerGrafu:
 
             # Sprawdzenie zajętości węzła
             if obecny_wezel.zajety:
-                if DEBUG_MODE:
+                if config.DEBUG_MODE:
                     print(f"[DEBUG] Zajęty kafelek '{obecny_wezel_id}' napotkany po {liczba_wolnych_kafelkow} wolnych kafelkach.")
                 return liczba_wolnych_kafelkow, "zajety_kafelek"
 
             # Sprawdzenie semafora na węźle
             semafor = self.semafory_dla_wezlow.get((obecny_wezel_id, obecny_kierunek))
             if semafor and semafor.sygnal == Sygnal.CZERWONY:
-                if DEBUG_MODE:
+                if config.DEBUG_MODE:
                     print(f"[DEBUG] Czerwony semafor '{semafor.id_semafora}' napotkany po {liczba_wolnych_kafelkow} wolnych kafelkach.")
                 return liczba_wolnych_kafelkow, "czerwony_semafor"
 
             # Próba przejścia do następnego węzła
             nastepny = obecny_wezel.nastepny_wezel(obecny_kierunek)
             if not nastepny:
-                if DEBUG_MODE:
+                if config.DEBUG_MODE:
                     print(f"[DEBUG] Koniec toru napotkany po {liczba_wolnych_kafelkow} wolnych kafelkach.")
                 return liczba_wolnych_kafelkow, "koniec_toru"
 
@@ -114,7 +113,29 @@ class MenedzerGrafu:
             obecny_wezel_id, obecny_kierunek = nastepny
             liczba_wolnych_kafelkow += 1
 
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             print(f"[DEBUG] Osiągnięto maksymalną liczbę kroków ({max_liczba_krokow}) po {liczba_wolnych_kafelkow} wolnych kafelkach.")
 
         return liczba_wolnych_kafelkow, "max_glebokosc_poszukiwania"
+
+    def odczytaj_najblizszy_semafor(self, id_punktu_poczatkowego: str, kierunek_nadjezdzania: Kierunek, zasieg: int = 5) -> Optional[Sygnal]:
+        """Zwraca sygnal na najblizszym semaforze przed pociagiem"""
+        id_obecny_wezel = id_punktu_poczatkowego
+        obecny_kierunek = kierunek_nadjezdzania
+
+        for _ in range(zasieg):
+            semafor = self.semafory_dla_wezlow.get((id_obecny_wezel,obecny_kierunek))
+            if semafor:
+                return semafor.sygnal
+
+            obecny_wezel = self.wezly.get(id_obecny_wezel)
+            if not obecny_wezel:
+                break
+
+            nastepny = obecny_wezel.nastepny_wezel(obecny_kierunek)
+            if not nastepny:
+                break
+
+            id_obecny_wezel, obecny_kierunek = nastepny
+
+        return None
