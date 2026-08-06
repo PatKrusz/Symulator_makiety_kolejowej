@@ -1,6 +1,6 @@
 import pygame as py
 import math
-from typing import Dict
+from typing import Dict, Optional, Tuple
 import config
 from Graf import MenedzerGrafu
 from Menedzer_pociagow import MenedzerPociagow
@@ -37,13 +37,67 @@ class SilnikGraficzny:
 
         self.powierzchnia_alfa = py.Surface((szerokosc, wysokosc), py.SRCALPHA)
 
+        self.zoom: float = 1.0
+        self.zoom_min: float = 0.35
+        self.zoom_max: float = 3.0
+        self.przesuniecie_x: float = 0.0
+        self.przesuniecie_y: float = 0.0
+
+    def resetuj_widok(self) -> None:
+        self.zoom = 1.0
+        self.przesuniecie_x = 0.0
+        self.przesuniecie_y = 0.0
+
+    def swiat_na_ekran(self, x: float, y: float) -> Tuple[float, float]:
+        return (x * self.zoom + self.przesuniecie_x, y * self.zoom + self.przesuniecie_y)
+
+    def ekran_na_swiat(self, x: float, y: float) -> Tuple[float, float]:
+        return ((x - self.przesuniecie_x) / self.zoom, (y - self.przesuniecie_y) / self.zoom)
+
+    def ekran_na_siatke(self, pos: Tuple[int, int]) -> Tuple[int, int]:
+        x_swiat, y_swiat = self.ekran_na_swiat(float(pos[0]), float(pos[1]))
+        return int(x_swiat // self.skaler.rozmiar_kafelka_px), int(y_swiat // self.skaler.rozmiar_kafelka_px)
+
+    def ustaw_zoom(self, kierunek: int, punkt_ekranu: Optional[Tuple[int, int]] = None) -> None:
+        if kierunek == 0:
+            return
+
+        stary_zoom = self.zoom
+        nowy_zoom = self.zoom * (1.12 if kierunek > 0 else 1.0 / 1.12)
+        nowy_zoom = max(self.zoom_min, min(self.zoom_max, nowy_zoom))
+        if abs(nowy_zoom - stary_zoom) < 1e-6:
+            return
+
+        if punkt_ekranu is None:
+            punkt_ekranu = (self.ekran.get_width() // 2, self.ekran.get_height() // 2)
+
+        wx, wy = self.ekran_na_swiat(float(punkt_ekranu[0]), float(punkt_ekranu[1]))
+        self.zoom = nowy_zoom
+        self.przesuniecie_x = float(punkt_ekranu[0]) - wx * self.zoom
+        self.przesuniecie_y = float(punkt_ekranu[1]) - wy * self.zoom
+
+    def przesun_widok(self, dx: float, dy: float) -> None:
+        self.przesuniecie_x += dx
+        self.przesuniecie_y += dy
+
     def rysuj_siatke(self, szerokosc: int, wysokosc: int) -> None:
         """Rysuje siatkę dzielącą przestrzeń na kafelki"""
         rozmiar = self.skaler.rozmiar_kafelka_px
-        for x in range(0, szerokosc, rozmiar):
-            py.draw.line(self.ekran, KOLORY["SIATKA"], (x, 0), (x, wysokosc))
-        for y in range(0, wysokosc, rozmiar):
-            py.draw.line(self.ekran, KOLORY["SIATKA"], (0, y), (szerokosc, y))
+        world_left, world_top = self.ekran_na_swiat(0.0, 0.0)
+        world_right, world_bottom = self.ekran_na_swiat(float(szerokosc), float(wysokosc))
+
+        x_start = int(math.floor(world_left / rozmiar) * rozmiar)
+        x_end = int(math.ceil(world_right / rozmiar) * rozmiar)
+        y_start = int(math.floor(world_top / rozmiar) * rozmiar)
+        y_end = int(math.ceil(world_bottom / rozmiar) * rozmiar)
+
+        for x_world in range(x_start, x_end + rozmiar, rozmiar):
+            x, _ = self.swiat_na_ekran(float(x_world), 0.0)
+            py.draw.line(self.ekran, KOLORY["SIATKA"], (int(x), 0), (int(x), wysokosc))
+
+        for y_world in range(y_start, y_end + rozmiar, rozmiar):
+            _, y = self.swiat_na_ekran(0.0, float(y_world))
+            py.draw.line(self.ekran, KOLORY["SIATKA"], (0, int(y)), (szerokosc, int(y)))
 
     def _wyciagnij_wezel_cel(self, element, graf: MenedzerGrafu):
         """Pomocnicza metoda bezpiecznie odczytująca węzeł docelowy."""
@@ -115,31 +169,39 @@ class SilnikGraficzny:
                 if wezel:
                     x_px = wezel.x * rozmiar
                     y_px = wezel.y * rozmiar
-                    py.draw.rect(self.powierzchnia_alfa, KOLORY["STACJA"], (x_px, y_px, rozmiar, rozmiar))
+                    x_r, y_r = self.swiat_na_ekran(float(x_px), float(y_px))
+                    rozmiar_r = max(1, int(round(rozmiar * self.zoom)))
+                    py.draw.rect(self.powierzchnia_alfa, KOLORY["STACJA"], (int(x_r), int(y_r), rozmiar_r, rozmiar_r))
         self.ekran.blit(self.powierzchnia_alfa, (0, 0))
 
         # 2. Tory i Zwrotnice
         for wezel in graf.wezly.values():
-            x_srodek, y_srodek = self.skaler.siatka_na_ekran(wezel.x, wezel.y)
+            x_swiat, y_swiat = self.skaler.siatka_na_ekran(wezel.x, wezel.y)
+            x_srodek, y_srodek = self.swiat_na_ekran(x_swiat, y_swiat)
+            kolor_wesela = (180, 180, 180)
+            promien = max(2, int(round(4 * self.zoom)))
 
             if isinstance(wezel, WezelZwrotnicy):
                 # Odczytanie aktualnego stanu zwrotnicy z pola self.pozycja
                 stan = getattr(wezel, "pozycja", getattr(wezel, "zwrot", getattr(wezel, "stan", Zwrot.PLUS)))
                 stan_str = str(stan.name if hasattr(stan, "name") else stan).upper()
                 czy_plus_aktywny = "MINUS" not in stan_str
+                kolor_wesela = (200, 100, 200)
+                promien = max(3, int(round(6 * self.zoom)))
 
                 # --- 2A. Połączenia w stanie PLUS ---
                 polaczenia_plus = getattr(wezel, "polaczenia_plus", {})
                 for p in polaczenia_plus.values():
                     wezel_cel = self._wyciagnij_wezel_cel(p, graf)
                     if wezel_cel:
-                        x_cel, y_cel = self.skaler.siatka_na_ekran(wezel_cel.x, wezel_cel.y)
+                        x_cel_w, y_cel_w = self.skaler.siatka_na_ekran(wezel_cel.x, wezel_cel.y)
+                        x_cel, y_cel = self.swiat_na_ekran(x_cel_w, y_cel_w)
                         self._rysuj_strzalke(
                             start=(x_srodek, y_srodek),
                             cel=(x_cel, y_cel),
                             kolor=KOLORY["TOR_AKTYWNY"] if czy_plus_aktywny else KOLORY["TOR_NIEAKTYWNY"],
-                            rozmiar_grotu=10 if czy_plus_aktywny else 6,
-                            grubosc=3 if czy_plus_aktywny else 1
+                            rozmiar_grotu=max(4, int(round((10 if czy_plus_aktywny else 6) * self.zoom))),
+                            grubosc=max(1, int(round((3 if czy_plus_aktywny else 1) * self.zoom)))
                         )
 
                 # --- 2B. Połączenia w stanie MINUS ---
@@ -147,18 +209,21 @@ class SilnikGraficzny:
                 for p in polaczenia_minus.values():
                     wezel_cel = self._wyciagnij_wezel_cel(p, graf)
                     if wezel_cel:
-                        x_cel, y_cel = self.skaler.siatka_na_ekran(wezel_cel.x, wezel_cel.y)
+                        x_cel_w, y_cel_w = self.skaler.siatka_na_ekran(wezel_cel.x, wezel_cel.y)
+                        x_cel, y_cel = self.swiat_na_ekran(x_cel_w, y_cel_w)
                         czy_aktywny = not czy_plus_aktywny
                         self._rysuj_strzalke(
                             start=(x_srodek, y_srodek),
                             cel=(x_cel, y_cel),
                             kolor=KOLORY["TOR_AKTYWNY"] if czy_aktywny else KOLORY["TOR_NIEAKTYWNY"],
-                            rozmiar_grotu=10 if czy_aktywny else 6,
-                            grubosc=3 if czy_aktywny else 1
+                            rozmiar_grotu=max(4, int(round((10 if czy_aktywny else 6) * self.zoom))),
+                            grubosc=max(1, int(round((3 if czy_aktywny else 1) * self.zoom)))
                         )
 
                 # Wyróżnienie środka zwrotnicy fioletowym pierścieniem
-                py.draw.circle(self.ekran, (200, 100, 200), (int(x_srodek), int(y_srodek)), 6, 2)
+                py.draw.circle(self.ekran, (200, 100, 200), (int(x_srodek), int(y_srodek)), max(4, int(round(6 * self.zoom))), max(1, int(round(2 * self.zoom))))
+                if getattr(wezel, "stan_awaryjny", False):
+                    py.draw.circle(self.ekran, (255, 60, 60), (int(x_srodek), int(y_srodek)), max(6, int(round(10 * self.zoom))), max(1, int(round(2 * self.zoom))))
 
             else:
                 # --- 2C. Zwykły tor ---
@@ -170,14 +235,17 @@ class SilnikGraficzny:
                 for p in kolekcja:
                     wezel_cel = self._wyciagnij_wezel_cel(p, graf)
                     if wezel_cel:
-                        x_cel, y_cel = self.skaler.siatka_na_ekran(wezel_cel.x, wezel_cel.y)
-                        self._rysuj_strzalke(
+                        x_cel_w, y_cel_w = self.skaler.siatka_na_ekran(wezel_cel.x, wezel_cel.y)
+                        x_cel, y_cel = self.swiat_na_ekran(x_cel_w, y_cel_w)
+                        self._rysuj_linie(
                             start=(x_srodek, y_srodek),
                             cel=(x_cel, y_cel),
                             kolor=KOLORY["TOR"],
-                            rozmiar_grotu=8,
-                            grubosc=2
+                            grubosc=max(1, int(round(2 * self.zoom)))
                         )
+
+            py.draw.circle(self.ekran, kolor_wesela, (int(x_srodek), int(y_srodek)), promien)
+            py.draw.circle(self.ekran, (15, 15, 15), (int(x_srodek), int(y_srodek)), promien, 1)
 
             # Debugowe etykiety ID
             if config.DEBUG_MODE:
@@ -189,10 +257,13 @@ class SilnikGraficzny:
         for semafor in graf.semafory.values():
             wezel_toru = graf.wezly.get(semafor.id_toru)
             if wezel_toru:
-                x, y = self.skaler.siatka_na_ekran(wezel_toru.x, wezel_toru.y)
+                x_w, y_w = self.skaler.siatka_na_ekran(wezel_toru.x, wezel_toru.y)
+                x, y = self.swiat_na_ekran(x_w, y_w)
                 kolor = KOLORY.get(semafor.sygnal, KOLORY["TEKST"])
-                py.draw.circle(self.ekran, kolor, (int(x + 10), int(y - 10)), 6)
-                py.draw.circle(self.ekran, (0, 0, 0), (int(x + 10), int(y - 10)), 6, 1)
+                promien = max(4, int(round(6 * self.zoom)))
+                przes = max(6, int(round(10 * self.zoom)))
+                py.draw.circle(self.ekran, kolor, (int(x + przes), int(y - przes)), promien)
+                py.draw.circle(self.ekran, (0, 0, 0), (int(x + przes), int(y - przes)), promien, max(1, int(round(self.zoom))))
 
     def rysuj_pociagi(self, menedzer_pociagow: MenedzerPociagow) -> None:
         """Rysuje pociągi na makiecie."""
@@ -205,23 +276,24 @@ class SilnikGraficzny:
             for i, id_kafelka in enumerate(pociag.id_zajetych_kafelkow):
                 wezel = menedzer_pociagow.graf.wezly.get(id_kafelka)
                 if wezel:
-                    x, y = self.skaler.siatka_na_ekran(wezel.x, wezel.y)
+                    x_w, y_w = self.skaler.siatka_na_ekran(wezel.x, wezel.y)
+                    x, y = self.swiat_na_ekran(x_w, y_w)
 
                     jest_poczatkiem = (i == len(pociag.id_zajetych_kafelkow) - 1)
                     kolor = KOLORY["POCIAG"] if jest_poczatkiem else (30, 100, 200)
 
-                    szer, wys = rozmiar * 0.6, rozmiar * 0.6
+                    szer, wys = max(4, int(round(rozmiar * 0.6 * self.zoom))), max(4, int(round(rozmiar * 0.6 * self.zoom)))
                     prostokat = py.Rect(0, 0, szer, wys)
                     prostokat.center = (x, y)
 
                     py.draw.rect(self.ekran, kolor, prostokat)
-                    py.draw.rect(self.ekran, (0, 0, 0), prostokat, 2)
+                    py.draw.rect(self.ekran, (0, 0, 0), prostokat, max(1, int(round(2 * self.zoom))))
 
                     if jest_poczatkiem:
                         tekst = self.czcionka_duza.render(pociag.id_pociagu, True, KOLORY["TEKST"])
                         self.ekran.blit(tekst, (x - 12, y - 8))
 
-    def renderuj_klatke(self, graf: MenedzerGrafu, menedzer_pociagow: MenedzerPociagow, czas_symulacji: str) -> None:
+    def renderuj_klatke(self, graf: MenedzerGrafu, menedzer_pociagow: MenedzerPociagow, czas_symulacji: str, edytor=None) -> None:
         """Funkcja wywoływana co klatkę w pętli."""
         self.ekran.fill(KOLORY["TLO"])
 
@@ -231,6 +303,16 @@ class SilnikGraficzny:
         self.rysuj_siatke(szerokosc, wysokosc)
         self.rysuj_infrastrukture(graf)
         self.rysuj_pociagi(menedzer_pociagow)
+
+        if edytor is not None:
+            edytor.rysuj_nakladke(
+                self.ekran,
+                graf,
+                self.skaler,
+                self.czcionka,
+                self.czcionka_duza,
+                swiat_na_ekran=self.swiat_na_ekran,
+            )
 
         tekst_czasu = self.czcionka_duza.render(f"Czas: {czas_symulacji}", True, KOLORY["TEKST"])
         self.ekran.blit(tekst_czasu, (10, 10))
@@ -279,3 +361,9 @@ class SilnikGraficzny:
         p_koniec = (int(koniec_x), int(koniec_y))
 
         py.draw.polygon(self.ekran, kolor, [p_koniec, p1, p2])
+
+    def _rysuj_linie(self, start, cel, kolor, grubosc=2):
+        """Rysuje zwykłe połączenie bez grotu strzałki."""
+        x1, y1 = start
+        x2, y2 = cel
+        py.draw.line(self.ekran, kolor, (int(x1), int(y1)), (int(x2), int(y2)), grubosc)

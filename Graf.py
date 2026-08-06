@@ -1,6 +1,6 @@
 # Menedżer grafu szlaku
 
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 import config
 from Wezly import WezelGrafu, WezelZwrotnicy, WezelSemafora, ObszarStacji, Kierunek, Sygnal
 
@@ -31,6 +31,171 @@ class MenedzerGrafu:
         """Dodaje stację do grafu."""
         self.stacje[stacja.id_stacji] = stacja
 
+    def znajdz_wezel_po_wspolrzednych(self, x: int, y: int) -> Optional[WezelGrafu]:
+        """Zwraca węzeł znajdujący się na podanych współrzędnych siatki."""
+        for wezel in self.wezly.values():
+            if wezel.x == x and wezel.y == y:
+                return wezel
+        return None
+
+    def usun_wezel(self, id_wezla: str) -> bool:
+        """Usuwa węzeł i wszystkie połączenia prowadzące do niego."""
+        wezel = self.wezly.pop(id_wezla, None)
+        if not wezel:
+            return False
+
+        self.zwrotnice.pop(id_wezla, None)
+
+        for inny_wezel in self.wezly.values():
+            if hasattr(inny_wezel, "polaczenia") and isinstance(inny_wezel.polaczenia, dict):
+                inny_wezel.polaczenia = {
+                    kierunek: wartosc
+                    for kierunek, wartosc in inny_wezel.polaczenia.items()
+                    if wartosc[0] != id_wezla
+                }
+
+            if isinstance(inny_wezel, WezelZwrotnicy):
+                inny_wezel.polaczenia_plus = {
+                    kierunek: wartosc
+                    for kierunek, wartosc in inny_wezel.polaczenia_plus.items()
+                    if wartosc[0] != id_wezla
+                }
+                inny_wezel.polaczenia_minus = {
+                    kierunek: wartosc
+                    for kierunek, wartosc in inny_wezel.polaczenia_minus.items()
+                    if wartosc[0] != id_wezla
+                }
+                if inny_wezel.polaczenie_glowne and inny_wezel.polaczenie_glowne[0] == id_wezla:
+                    inny_wezel.polaczenie_glowne = None
+                if inny_wezel.polaczenie_zwrotne_plus and inny_wezel.polaczenie_zwrotne_plus[0] == id_wezla:
+                    inny_wezel.polaczenie_zwrotne_plus = None
+                if inny_wezel.polaczenie_zwrotne_minus and inny_wezel.polaczenie_zwrotne_minus[0] == id_wezla:
+                    inny_wezel.polaczenie_zwrotne_minus = None
+
+        for klucz, semafor in list(self.semafory_dla_wezlow.items()):
+            if semafor.id_toru == id_wezla:
+                self.semafory_dla_wezlow.pop(klucz, None)
+
+        for id_semafora, semafor in list(self.semafory.items()):
+            if semafor.id_toru == id_wezla:
+                self.semafory.pop(id_semafora, None)
+
+        for id_stacji, stacja in list(self.stacje.items()):
+            if id_wezla in stacja.id_torow:
+                stacja.id_torow = [id_toru for id_toru in stacja.id_torow if id_toru != id_wezla]
+                if not stacja.id_torow:
+                    self.stacje.pop(id_stacji, None)
+
+        return True
+
+    def eksportuj_do_slownika(self) -> Dict[str, Any]:
+        """Eksportuje bieżący graf do struktury zgodnej z plikiem konfiguracyjnym."""
+        wezly = []
+        for wezel in self.wezly.values():
+            if isinstance(wezel, WezelZwrotnicy):
+                wezly.append(
+                    {
+                        "id": wezel.id_wezel,
+                        "x": wezel.x,
+                        "y": wezel.y,
+                        "polaczenia_plus": {
+                            kierunek.name: {
+                                "id_cel": id_cel,
+                                "kierunek_wejscia_cel": kierunek_cel.name,
+                            }
+                            for kierunek, (id_cel, kierunek_cel) in wezel.polaczenia_plus.items()
+                        },
+                        "polaczenia_minus": {
+                            kierunek.name: {
+                                "id_cel": id_cel,
+                                "kierunek_wejscia_cel": kierunek_cel.name,
+                            }
+                            for kierunek, (id_cel, kierunek_cel) in wezel.polaczenia_minus.items()
+                        },
+                    }
+                )
+            else:
+                wezly.append(
+                    {
+                        "id": wezel.id_wezel,
+                        "x": wezel.x,
+                        "y": wezel.y,
+                        "polaczenia": {
+                            kierunek.name: {
+                                "id_cel": id_cel,
+                                "kierunek_wejscia_cel": kierunek_cel.name,
+                            }
+                            for kierunek, (id_cel, kierunek_cel) in wezel.polaczenia.items()
+                        },
+                    }
+                )
+
+        return {
+            "wezly": wezly,
+            "zwrotnice": [
+                {
+                    "id": zwrotnica.id_wezel,
+                    "x": zwrotnica.x,
+                    "y": zwrotnica.y,
+                    "kierunek_glowny": zwrotnica.kierunek_glowny.name if zwrotnica.kierunek_glowny else None,
+                    "kierunek_zwrotny_plus": zwrotnica.kierunek_zwrotny_plus.name if zwrotnica.kierunek_zwrotny_plus else None,
+                    "kierunek_zwrotny_minus": zwrotnica.kierunek_zwrotny_minus.name if zwrotnica.kierunek_zwrotny_minus else None,
+                    "polaczenie_glowne": {
+                        "id_cel": zwrotnica.polaczenie_glowne[0],
+                        "kierunek_wejscia_cel": zwrotnica.polaczenie_glowne[1].name,
+                    }
+                    if zwrotnica.polaczenie_glowne
+                    else None,
+                    "polaczenie_zwrotne_plus": {
+                        "id_cel": zwrotnica.polaczenie_zwrotne_plus[0],
+                        "kierunek_wejscia_cel": zwrotnica.polaczenie_zwrotne_plus[1].name,
+                    }
+                    if zwrotnica.polaczenie_zwrotne_plus
+                    else None,
+                    "polaczenie_zwrotne_minus": {
+                        "id_cel": zwrotnica.polaczenie_zwrotne_minus[0],
+                        "kierunek_wejscia_cel": zwrotnica.polaczenie_zwrotne_minus[1].name,
+                    }
+                    if zwrotnica.polaczenie_zwrotne_minus
+                    else None,
+                    # Stan awaryjny jest stanem runtime i nie powinien startować jako trwale aktywny.
+                    "stan_awaryjny": False,
+                    "polaczenia_plus": {
+                        kierunek.name: {
+                            "id_cel": id_cel,
+                            "kierunek_wejscia_cel": kierunek_cel.name,
+                        }
+                        for kierunek, (id_cel, kierunek_cel) in zwrotnica.polaczenia_plus.items()
+                    },
+                    "polaczenia_minus": {
+                        kierunek.name: {
+                            "id_cel": id_cel,
+                            "kierunek_wejscia_cel": kierunek_cel.name,
+                        }
+                        for kierunek, (id_cel, kierunek_cel) in zwrotnica.polaczenia_minus.items()
+                    },
+                }
+                for zwrotnica in self.zwrotnice.values()
+            ],
+            "semafory": [
+                {
+                    "id": semafor.id_semafora,
+                    "id_toru": semafor.id_toru,
+                    "kierunek_semafora": semafor.kierunek_sem.name,
+                    "domyslny_stan": semafor.sygnal.name,
+                }
+                for semafor in self.semafory.values()
+            ],
+            "stacje": [
+                {
+                    "id": stacja.id_stacji,
+                    "nazwa": stacja.nazwa_stacji,
+                    "id_torow": stacja.id_torow,
+                }
+                for stacja in self.stacje.values()
+            ],
+        }
+
     def zaladuj_z_slownika(self, infrastruktura: Dict) -> None:
         """Ładuje węzły, zwrotnice, semafory i stacje z podanego słownika wczytanego z JSON."""
 
@@ -56,6 +221,23 @@ class MenedzerGrafu:
                 kierunek = Kierunek[kierunek_str]
                 kierunek_cel = Kierunek[polaczenie["kierunek_wejscia_cel"]]
                 zwrotnica.polaczenia_minus[kierunek] = (polaczenie["id_cel"], kierunek_cel)
+
+            kierunek_glowny = zwrotnica_dane.get("kierunek_glowny")
+            kierunek_zwrotny_plus = zwrotnica_dane.get("kierunek_zwrotny_plus")
+            kierunek_zwrotny_minus = zwrotnica_dane.get("kierunek_zwrotny_minus")
+            polaczenie_glowne = zwrotnica_dane.get("polaczenie_glowne")
+            polaczenie_zwrotne_plus = zwrotnica_dane.get("polaczenie_zwrotne_plus")
+            polaczenie_zwrotne_minus = zwrotnica_dane.get("polaczenie_zwrotne_minus")
+
+            zwrotnica.ustaw_geometrie(
+                Kierunek[kierunek_glowny] if kierunek_glowny else None,
+                Kierunek[kierunek_zwrotny_plus] if kierunek_zwrotny_plus else None,
+                Kierunek[kierunek_zwrotny_minus] if kierunek_zwrotny_minus else None,
+                (polaczenie_glowne["id_cel"], Kierunek[polaczenie_glowne["kierunek_wejscia_cel"]]) if polaczenie_glowne else None,
+                (polaczenie_zwrotne_plus["id_cel"], Kierunek[polaczenie_zwrotne_plus["kierunek_wejscia_cel"]]) if polaczenie_zwrotne_plus else None,
+                (polaczenie_zwrotne_minus["id_cel"], Kierunek[polaczenie_zwrotne_minus["kierunek_wejscia_cel"]]) if polaczenie_zwrotne_minus else None,
+            )
+            zwrotnica.stan_awaryjny = False
             self.dodaj_wezel(zwrotnica)
 
         # Wczytywanie semaforów
@@ -103,7 +285,7 @@ class MenedzerGrafu:
                 return liczba_wolnych_kafelkow, "czerwony_semafor"
 
             # Próba przejścia do następnego węzła
-            nastepny = obecny_wezel.nastepny_wezel(obecny_kierunek)
+            nastepny = obecny_wezel.nastepny_wezel(obecny_kierunek, raportuj_awarie=False)
             if not nastepny:
                 if config.DEBUG_MODE:
                     print(f"[DEBUG] Koniec toru napotkany po {liczba_wolnych_kafelkow} wolnych kafelkach.")
@@ -132,7 +314,7 @@ class MenedzerGrafu:
             if not obecny_wezel:
                 break
 
-            nastepny = obecny_wezel.nastepny_wezel(obecny_kierunek)
+            nastepny = obecny_wezel.nastepny_wezel(obecny_kierunek, raportuj_awarie=False)
             if not nastepny:
                 break
 

@@ -51,9 +51,28 @@ class SledzenieRozkladu:
         self.stan_pociagu: StanPociagu = StanPociagu.JAZDA
         self.zegar_postoju: float = 0.0 # Obecny czas postoju na stacji
 
-    def aktualizuj_logike_rozkladu(
-        self, delta_czasu_symulacji: float, pociag: Pociag, graf: MenedzerGrafu) -> float:
-        """Aktualizuje stan realizacji rozkładu. Zwraca rekomendowaną prędkość docelową"""
+    def id_docelowej_stacji(self) -> Optional[str]:
+        """Zwraca ID bieżącej stacji docelowej z rozkładu lub None."""
+        if not self.rozklad or self.rozklad.czy_koniec():
+            return None
+
+        przystanek = self.rozklad.aktualny_przystanek()
+        return przystanek.id_stacji if przystanek else None
+
+    def aktualizuj_stan_postoju(
+        self,
+        delta_czasu_symulacji: float,
+        pociag: Pociag,
+        czy_na_stacji_docelowej: bool,
+        czy_na_koncu_stacji_docelowej: bool = False,
+    ) -> Optional[float]:
+        """
+        Aktualizuje stan rozkładu niezależnie od logiki "patrzenia w przód".
+
+        Zwraca:
+        - 0.0 / predkosc_max_pxs gdy rozkład wymusza konkretną prędkość,
+        - None gdy decyzja o prędkości ma zostać podjęta przez logikę szlakową.
+        """
         if not self.rozklad or self.rozklad.czy_koniec():
             self.stan_pociagu = StanPociagu.KONIEC_TRASY
             return pociag.predkosc_max_pxs
@@ -63,10 +82,7 @@ class SledzenieRozkladu:
             self.stan_pociagu = StanPociagu.JAZDA
             return pociag.predkosc_max_pxs
 
-        stacja_docelowa = graf.stacje.get(obecny_przystanek.id_stacji)
-        id_przodu = pociag.id_zajetych_kafelkow[-1] if pociag.id_zajetych_kafelkow else None
-
-        # 1. Trwający postój (pociąg stoi w miejscu i czeka)
+        # Trwający postój na stacji.
         if self.stan_pociagu == StanPociagu.POSTOJ:
             self.zegar_postoju += delta_czasu_symulacji
             if self.zegar_postoju >= obecny_przystanek.czas_postoju:
@@ -78,30 +94,38 @@ class SledzenieRozkladu:
                 return pociag.predkosc_max_pxs
             return 0.0
 
-        # 2. Pociąg zbliża się lub wjechał na kafelek stacji
-        if stacja_docelowa:
-            # Jeśli czoło stoi już na stacji
-            if id_przodu in stacja_docelowa.id_torow:
-                if pociag.predkosc_aktualna_pxs == 0.0:
-                    self.stan_pociagu = StanPociagu.POSTOJ
-                    self.zegar_postoju = 0.0
-                    return 0.0
-                
+        # Czoło pociągu już znajduje się na stacji docelowej.
+        if czy_na_stacji_docelowej:
+            if not czy_na_koncu_stacji_docelowej:
                 self.stan_pociagu = StanPociagu.HAMOWANIE
-                return 0.0 # Wylecenie do zera na stacji
+                return None
 
-            # Sprawdzenie, czy następny kafelek to stacja (wczesne zwalnianie)
-            kafelek_przodu = graf.wezly.get(id_przodu)
-            if kafelek_przodu:
-                nastepny = kafelek_przodu.nastepny_wezel(pociag.aktualny_kierunek)
-                if nastepny and nastepny[0] in stacja_docelowa.id_torow:
-                    self.stan_pociagu = StanPociagu.HAMOWANIE
-                    # Zmniejszamy prędkość docelową do 30% przed wjechaniem na stację
-                    return pociag.predkosc_max_pxs * 0.3
+            if pociag.predkosc_aktualna_pxs == 0.0:
+                self.stan_pociagu = StanPociagu.POSTOJ
+                self.zegar_postoju = 0.0
+                return 0.0
 
-        # 3. Zwykła jazda szlakowa
+            self.stan_pociagu = StanPociagu.HAMOWANIE
+            return 0.0
+
         self.stan_pociagu = StanPociagu.JAZDA
-        return pociag.predkosc_max_pxs
+        return None
+
+    def aktualizuj_logike_rozkladu(
+        self, delta_czasu_symulacji: float, pociag: Pociag, graf: MenedzerGrafu) -> float:
+        """Zachowana kompatybilność starego API. Logika szlakowa jest w MenedzerPociagow."""
+        id_docelowej_stacji = self.id_docelowej_stacji()
+        stacja_docelowa = graf.stacje.get(id_docelowej_stacji) if id_docelowej_stacji else None
+        id_przodu = pociag.id_zajetych_kafelkow[-1] if pociag.id_zajetych_kafelkow else None
+        czy_na_stacji_docelowej = bool(stacja_docelowa and id_przodu in stacja_docelowa.id_torow)
+
+        wynik = self.aktualizuj_stan_postoju(
+            delta_czasu_symulacji,
+            pociag,
+            czy_na_stacji_docelowej,
+            czy_na_koncu_stacji_docelowej=czy_na_stacji_docelowej,
+        )
+        return pociag.predkosc_max_pxs if wynik is None else wynik
 
 # Test jednostkowy
 
