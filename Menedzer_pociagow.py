@@ -123,6 +123,12 @@ class MenedzerPociagow:
 
         return None
 
+    def _predkosc_bezpieczna_z_buforem(self, pociag: Pociag, dystans_do_semafora_px: float) -> float:
+        bezpieczny_dystans_px = max(0.0, dystans_do_semafora_px - pociag.skaler.rozmiar_kafelka_px)
+        if pociag.efektywne_hamowanie_pxs2 <= 0.0 or bezpieczny_dystans_px <= 0.0:
+            return 0.0
+        return math.sqrt(max(0.0, 2.0 * pociag.efektywne_hamowanie_pxs2 * bezpieczny_dystans_px))
+
     def _wyznacz_predkosc_docelowa(self, delta_czasu_symulacji: float, pociag: Pociag, sledzenie: Optional[SledzenieRozkladu]) -> float:
         """
         Jedno miejsce decyzyjne "patrzenia w przód": stacja docelowa + semafory.
@@ -149,7 +155,7 @@ class MenedzerPociagow:
         # Ograniczenie po żółtym działa do kolejnego semafora.
         zolty_info = self._zolty_tryb.get(pociag.id_pociagu)
         if zolty_info:
-            semafor_tutaj = self.graf.semafory_dla_wezlow.get((id_kafelka_przod, pociag.aktualny_kierunek))
+            semafor_tutaj = pociag._znajdz_semafor_dla_kierunku(self.graf, id_kafelka_przod, pociag.aktualny_kierunek)
             if semafor_tutaj and semafor_tutaj.id_semafora != zolty_info.get("origin"):
                 self._zolty_tryb.pop(pociag.id_pociagu, None)
             else:
@@ -209,7 +215,7 @@ class MenedzerPociagow:
                         predkosc_docelowa = min(predkosc_docelowa, predkosc_dokladnego_dociagniecia)
                     break
 
-                semafor = self.graf.semafory_dla_wezlow.get((obecny_id, obecny_kierunek))
+                semafor = pociag._znajdz_semafor_dla_kierunku(self.graf, obecny_id, obecny_kierunek)
                 if semafor:
                     if semafor.sygnal == Sygnal.CZERWONY:
                         if krok == 0:
@@ -221,9 +227,7 @@ class MenedzerPociagow:
                             dystans_do_semafora_px = krok * pociag.skaler.rozmiar_kafelka_px
 
                         if dystans_do_semafora_px > 0:
-                            vmax_przed_czerwonym = math.sqrt(
-                                max(0.0, 2.0 * pociag.efektywne_hamowanie_pxs2 * dystans_do_semafora_px)
-                            )
+                            vmax_przed_czerwonym = self._predkosc_bezpieczna_z_buforem(pociag, dystans_do_semafora_px)
                             if krok == 0 and pociag.predkosc_aktualna_pxs <= vmax_przed_czerwonym + 0.001:
                                 predkosc_docelowa = 0.0
                             else:
@@ -244,9 +248,7 @@ class MenedzerPociagow:
                                 dystans_do_semafora_px = krok * pociag.skaler.rozmiar_kafelka_px
 
                             if dystans_do_semafora_px > 0:
-                                vmax_przed_sz = math.sqrt(
-                                    max(0.0, 2.0 * pociag.efektywne_hamowanie_pxs2 * dystans_do_semafora_px)
-                                )
+                                vmax_przed_sz = self._predkosc_bezpieczna_z_buforem(pociag, dystans_do_semafora_px)
                                 if krok == 0 and pociag.predkosc_aktualna_pxs <= vmax_przed_sz + 0.001:
                                     predkosc_docelowa = 0.0
                                 else:
@@ -391,9 +393,25 @@ class MenedzerPociagow:
                                 "semafor_id": id_toru,
                             }
                         )
+                elif typ_zdarzenia == "pociag_zatrzymal_sie_na_czerwonym":
+                    wszystkie_zdarzenia.append(
+                        {
+                            "typ": "pociag_zatrzymal_sie_na_czerwonym",
+                            "pociag_id": id_pociagu,
+                            "semafor_id": id_toru,
+                        }
+                    )
+                elif typ_zdarzenia == "pociag_odjechal_z_czerwonego":
+                    wszystkie_zdarzenia.append(
+                        {
+                            "typ": "pociag_odjechal_z_czerwonego",
+                            "pociag_id": id_pociagu,
+                            "semafor_id": id_toru,
+                        }
+                    )
 
-            if config.DEBUG_MODE:
-                print(f"[DEBUG] Prędkość docelowa pociągu {pociag.id_pociagu}: {pociag.predkosc_docelowa_pxs}")
-                print(f"[DEBUG] Prędkość aktualna pociągu {pociag.id_pociagu}: {pociag.predkosc_aktualna_pxs}")
+            #if config.DEBUG_MODE:
+                #print(f"[DEBUG] Prędkość docelowa pociągu {pociag.id_pociagu}: {pociag.predkosc_docelowa_pxs}")
+                #print(f"[DEBUG] Prędkość aktualna pociągu {pociag.id_pociagu}: {pociag.predkosc_aktualna_pxs}")
 
         return wszystkie_zdarzenia

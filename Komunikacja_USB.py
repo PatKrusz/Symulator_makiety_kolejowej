@@ -1,10 +1,11 @@
 import importlib
+import json
 from typing import Any, Dict, List, Optional, Tuple
 
 import config
 from Graf import MenedzerGrafu
 from Menedzer_pociagow import MenedzerPociagow
-from Wezly import Kierunek, Sygnal, Zwrot
+from Wezly import Kierunek, Sygnal, Zwrot, WezelZwrotnicy
 from Zegar_symulacji import ZegarSymulacji
 
 try:
@@ -19,10 +20,8 @@ class MostKomunikacjiUSB:
     """
     Prosty most komunikacyjny USB<->symulator.
 
-    Preferowany format ramki: tekst zakończony znakiem nowej linii, np:
+    Format ramki komunikacyjnej: tekst zakończony znakiem nowej linii, np:
     SYG:S01:ZIE\n
-
-    Obsługiwany jest wyłącznie format tekstowy.
     """
 
     _MAPA_SYGNAL_TXT_DO_ENUM = {
@@ -78,14 +77,21 @@ class MostKomunikacjiUSB:
         self._serial = None
         self._sekcje: Dict[str, Dict[str, Any]] = {}
         self._sekcja_dla_toru: Dict[str, str] = {}
+        self._sasiedzi_torow: Dict[str, set[str]] = {}
         self._zajetosc_sekcji_pociagow: Dict[str, Dict[str, int]] = {}
+        self._aktualna_sekcja_pociagu: Dict[str, str] = {}
 
         self._zbuduj_model_sekcji()
+
+        #self._zbuduj_mape_sekcji_dla_kontrolera()
 
         if self.wlaczony:
             self._otworz_port()
 
     def _otworz_port(self) -> None:
+        """
+        Próba otwarcia portu szeregowego. Jeśli nie uda się, wyłączamy komunikację USB.
+        """
         if serial is None:
             print("[WARN] Brak pakietu pyserial. Komunikacja USB jest wyłączona.")
             self.wlaczony = False
@@ -104,6 +110,9 @@ class MostKomunikacjiUSB:
             self.wlaczony = False
 
     def zamknij(self) -> None:
+        """
+        Zamknięcie portu szeregowego, jeśli był otwarty.
+        """
         if self._serial:
             try:
                 self._serial.close()
@@ -112,13 +121,21 @@ class MostKomunikacjiUSB:
             self._serial = None
 
     def _wyslij_tekst(self, linia: str) -> None:
+        """
+        Wysyła tekst przez USB, jeśli komunikacja jest włączona.
+        """
         if not self.wlaczony or not self._serial:
+            if config.DEBUG_MODE:
+                print(f"[DEBUG] USB nie jest dostępne. Linia do wysłania: {linia}")
             return
 
         try:
             self._serial.write((linia + "\n").encode("utf-8"))
         except SerialException as e:
             print(f"[WARN] Błąd zapisu na USB: {e}")
+
+        if config.DEBUG_MODE:
+            print(f"[DEBUG] Wysłano przez USB: {linia}")
 
     def _sygnal_do_kodu(self, sygnal: Sygnal) -> str:
         return self._MAPA_SYGNAL_ENUM_DO_TXT.get(sygnal.value, sygnal.value)
@@ -135,61 +152,164 @@ class MostKomunikacjiUSB:
     def _odpowiedz_data_txt(self, *pola: str) -> None:
         self._wyslij_tekst("DAT:" + ":".join(pola))
 
+    def _zbuduj_sasiedztwo_torow(self) -> Dict[str, set[str]]:
+        """
+        Buduje słownik sąsiedztwa torów.
+        Zwraca:
+            Dict[str, set[str]]: Słownik, gdzie kluczem jest ID toru, a wartością zbiór ID sąsiednich torów.
+        """
+        sasiedzi: Dict[str, set[str]] = {id_toru: set() for id_toru in self.graf.wezly.keys()}
+
+        for id_toru, wezel in self.graf.wezly.items():
+            polaczenia = getattr(wezel, "polaczenia", {})
+            if isinstance(polaczenia, dict):
+                for wartosc in polaczenia.values():
+                    if isinstance(wartosc, tuple) and wartosc:
+                        id_celu = str(wartosc[0])
+                        sasiedzi.setdefault(id_toru, set()).add(id_celu)
+                        sasiedzi.setdefault(id_celu, set()).add(id_toru)
+
+            if id_toru in self.graf.zwrotnice:
+                zwrotnica = self.graf.zwrotnice[id_toru]
+                for mapa_polaczen in (zwrotnica.polaczenia_plus, zwrotnica.polaczenia_minus):
+                    for wartosc in mapa_polaczen.values():
+                        if isinstance(wartosc, tuple) and wartosc:
+                            id_celu = str(wartosc[0])
+                            sasiedzi.setdefault(id_toru, set()).add(id_celu)
+                            sasiedzi.setdefault(id_celu, set()).add(id_toru)
+
+        return sasiedzi
+
+    def _sekcja_dla_toru_lub_sasiedztwa(self, id_toru: str) -> str:
+        """
+        Zwraca ID sekcji, do której należy dany tor lub jego sąsiedztwo.
+        Zwraca:
+            str: ID sekcji lub "-" jeśli nie znaleziono odpowiedniej sekcji.
+        """
+        sekcja = self._sekcja_dla_toru.get(id_toru)
+        if sekcja:
+            return sekcja
+
+        kandydaci = {
+            self._sekcja_dla_toru[sasiad]
+            for sasiad in self._sasiedzi_torow.get(id_toru, set())
+            if sasiad in self._sekcja_dla_toru
+        }
+        if not kandydaci:
+            if id_toru in self.graf.zwrotnice:
+                zwrotnica = self.graf.zwrotnice[id_toru]
+                for mapa_polaczen in (zwrotnica.polaczenia_plus, zwrotnica.polaczenia_minus):
+                    for wartosc in mapa_polaczen.values():
+                        if not isinstance(wartosc, tuple) or not wartosc:
+                            continue
+                        sasiad = str(wartosc[0])
+                        if sasiad in self._sekcja_dla_toru:
+                            return self._sekcja_dla_toru[sasiad]
+            return "-"
+
+        return sorted(kandydaci)[0]
+
+    def _semafor_prowadzi_na_wyjazd_z_komponentu(self, id_semafora: str, komponent: set[str]) -> bool:
+        semafor = self.graf.semafory.get(id_semafora)
+        if not semafor:
+            return False
+
+        wezel = self.graf.wezly.get(semafor.id_toru)
+        if wezel is None:
+            return False
+
+        nastepny = wezel.nastepny_wezel(semafor.kierunek_sem, raportuj_awarie=False)
+        if not nastepny:
+            return False
+
+        id_celu = str(nastepny[0])
+        return id_celu not in komponent
+
     def _zbuduj_model_sekcji(self) -> None:
+        """Buduje model sekcji torów."""
         self._sekcje.clear()
         self._sekcja_dla_toru.clear()
+        self._sasiedzi_torow = self._zbuduj_sasiedztwo_torow()
 
-        max_kroki = max(1, len(self.graf.wezly) + 5)
+        semafory_na_torze: Dict[str, List[str]] = {}
         for semafor in self.graf.semafory.values():
-            start_id = semafor.id_toru
-            kierunek = semafor.kierunek_sem
-            obecny_id = start_id
-            obecny_kierunek = kierunek
-            odwiedzone = set()
-            tory_sekcji: List[str] = []
-            id_koncowego_semafora = "END"
+            semafory_na_torze.setdefault(semafor.id_toru, []).append(semafor.id_semafora)
 
-            for _ in range(max_kroki):
-                wezel = self.graf.wezly.get(obecny_id)
-                if not wezel:
-                    break
+        tory_graniczne = set(semafory_na_torze.keys())
+        odwiedzone: set[str] = set()
+        numer_sekcji = 1
 
-                nastepny = wezel.nastepny_wezel(obecny_kierunek, raportuj_awarie=False)
-                if not nastepny:
-                    break
+        for id_start in sorted(self.graf.wezly.keys()):
+            if id_start in odwiedzone or id_start in tory_graniczne:
+                continue
 
-                nastepny_id, nastepny_kierunek = nastepny
-                klucz = (nastepny_id, nastepny_kierunek)
-                if klucz in odwiedzone:
-                    break
-                odwiedzone.add(klucz)
+            kolejka = [id_start]
+            komponent: set[str] = set()
+            odwiedzone.add(id_start)
 
-                semafor_na_nastepnym = self.graf.semafory_dla_wezlow.get((nastepny_id, nastepny_kierunek))
-                if semafor_na_nastepnym:
-                    id_koncowego_semafora = semafor_na_nastepnym.id_semafora
-                    break
+            while kolejka:
+                id_toru = kolejka.pop(0)
+                komponent.add(id_toru)
+                for sasiad in self._sasiedzi_torow.get(id_toru, set()):
+                    if sasiad in odwiedzone or sasiad in tory_graniczne:
+                        continue
+                    if sasiad in self.graf.wezly:
+                        odwiedzone.add(sasiad)
+                        kolejka.append(sasiad)
 
-                tory_sekcji.append(nastepny_id)
-                obecny_id, obecny_kierunek = nastepny_id, nastepny_kierunek
+            if not komponent:
+                continue
 
-            id_sekcji = f"SEC:{semafor.id_semafora}->{id_koncowego_semafora}:{kierunek.value}"
-            self._sekcje[id_sekcji] = {
-                "id": id_sekcji,
-                "start_semafor": semafor.id_semafora,
-                "koniec_semafor": id_koncowego_semafora,
-                "kierunek": kierunek.value,
-                "tory": tory_sekcji,
+            kandydaci_graniczni: set[str] = set()
+            for id_toru in komponent:
+                for sasiad in self._sasiedzi_torow.get(id_toru, set()):
+                    if sasiad in semafory_na_torze:
+                        kandydaci_graniczni.update(semafory_na_torze[sasiad])
+
+            graniczne_semafory = {
+                id_semafora
+                for id_semafora in kandydaci_graniczni
+                if self._semafor_prowadzi_na_wyjazd_z_komponentu(id_semafora, komponent)
             }
 
-            for id_toru in tory_sekcji:
-                self._sekcja_dla_toru.setdefault(id_toru, id_sekcji)
+            if not graniczne_semafory:
+                continue
+
+            graniczne_lista = sorted(graniczne_semafory)
+            start_semafor = graniczne_lista[0] if graniczne_lista else "NONE"
+            koniec_semafor = graniczne_lista[1] if len(graniczne_lista) > 1 else (
+                graniczne_lista[0] if graniczne_lista else "END"
+            )
+
+            id_sekcji = f"SEK:{start_semafor}->{koniec_semafor}:{numer_sekcji:02d}"
+            self._sekcje[id_sekcji] = {
+                "id": id_sekcji,
+                "start_semafor": start_semafor,
+                "koniec_semafor": koniec_semafor,
+                "kierunek": "BIDIR",
+                "graniczne_semafory": graniczne_lista,
+                "tory": sorted(komponent),
+            }
+
+            for id_toru in komponent:
+                self._sekcja_dla_toru[id_toru] = id_sekcji
+
+            numer_sekcji += 1
+
+        for id_sekcji, dane in list(self._sekcje.items()):
+            self._sekcje[id_sekcji]["tory"] = sorted(set(dane.get("tory", [])))
+
+    def odswiez_model_sekcji(self) -> None:
+        self._zajetosc_sekcji_pociagow.clear()
+        self._aktualna_sekcja_pociagu.clear()
+        self._zbuduj_model_sekcji()
 
     def _sekcja_dla_pociagu(self, pociag_id: str) -> str:
         pociag = self.menedzer_pociagow.pociagi.get(pociag_id)
         if not pociag or not pociag.id_zajetych_kafelkow:
             return "-"
         id_czola = pociag.id_zajetych_kafelkow[-1]
-        return self._sekcja_dla_toru.get(id_czola, "-")
+        return self._sekcja_dla_toru_lub_sasiedztwa(str(id_czola))
 
     def _nastepna_stacja_pociagu(self, pociag_id: str) -> Tuple[str, str, str]:
         sledzenie = self.menedzer_pociagow.sledzenie_rozkladow.get(pociag_id)
@@ -219,33 +339,38 @@ class MostKomunikacjiUSB:
         return typ_up
 
     def _aktualizuj_i_raportuj_sekcje(self, zdarzenie: Dict[str, Any], czas_symulacji: str) -> None:
+        """
+        Aktualizuje model sekcji na podstawie zdarzenia zajęcia lub zwolnienia toru.
+        """
         typ = zdarzenie.get("typ")
         if typ not in {"tor_zajety", "tor_zwolniony"}:
             return
 
         id_pociagu = str(zdarzenie.get("pociag_id", ""))
         id_toru = str(zdarzenie.get("tor_id", ""))
-        id_sekcji = self._sekcja_dla_toru.get(id_toru)
-        if not id_pociagu or not id_sekcji:
+        id_sekcji = self._sekcja_dla_toru_lub_sasiedztwa(id_toru)
+        if not id_pociagu or not id_sekcji or id_sekcji == "-":
             return
 
-        licznik = self._zajetosc_sekcji_pociagow.setdefault(id_pociagu, {})
-        stan = int(licznik.get(id_sekcji, 0))
-
-        if typ == "tor_zajety":
-            stan += 1
-            licznik[id_sekcji] = stan
-            if stan == 1:
-                self._wyslij_tekst(f"EVT:SEC_IN:{id_pociagu}:{id_sekcji}:{czas_symulacji}")
+        poprzednia_sekcja = self._aktualna_sekcja_pociagu.get(id_pociagu)
+        if poprzednia_sekcja and poprzednia_sekcja == id_sekcji:
             return
 
-        if stan <= 1:
-            licznik.pop(id_sekcji, None)
-            self._wyslij_tekst(f"EVT:SEC_OUT:{id_pociagu}:{id_sekcji}:{czas_symulacji}")
-        else:
-            licznik[id_sekcji] = stan - 1
+        self._aktualna_sekcja_pociagu[id_pociagu] = id_sekcji
+        if poprzednia_sekcja:
+            self._wyslij_tekst(f"EVT:SEK_WYJ:{id_pociagu}:{poprzednia_sekcja}:{czas_symulacji}")
+            self._wyslij_tekst(f"EVT:SEK_WJA:{id_pociagu}:{id_sekcji}:{czas_symulacji}")
+            return
+
+        self._wyslij_tekst(f"EVT:SEK_WJA:{id_pociagu}:{id_sekcji}:{czas_symulacji}")
+
+        if config.DEBUG_MODE:
+            print(f"[DEBUG] Sekcja dla pociągu {id_pociagu}: {poprzednia_sekcja} -> {id_sekcji}")
 
     def wyslij_zdarzenie(self, typ: str, payload: Dict[str, Any]) -> None:
+        """
+        Wysyła zdarzenie przez USB.
+        """
         czas = self.zegar.obecna_data()
 
         if typ == "zwrotnica_rozpruta":
@@ -284,6 +409,9 @@ class MostKomunikacjiUSB:
         self._wyslij_tekst(f"EVT:UNK:{typ}:{czas}")
 
     def wyslij_zdarzenia_symulacji(self, zdarzenia: List[Dict[str, Any]], czas_symulacji: str) -> None:
+        """
+        Wysyła zdarzenia symulacji przez USB.
+        """
         zdarzenia_posortowane = sorted(
             zdarzenia,
             key=lambda z: 0 if z.get("typ") == "zwrotnica_rozpruta" else 1,
@@ -297,10 +425,12 @@ class MostKomunikacjiUSB:
                     f"EVT:AWR:{zdarzenie.get('zwrotnica_id', '-')}:{zdarzenie.get('pociag_id', '-')}:{czas_symulacji}"
                 )
             elif typ == "tor_zajety":
+                continue # nie wysyłamy raportu zajęcia toru, bo raportujemy sekcję
                 self._wyslij_tekst(
                     f"EVT:ZAJ:{zdarzenie.get('pociag_id', '-')}:{zdarzenie.get('tor_id', '-')}:{czas_symulacji}"
                 )
             elif typ == "tor_zwolniony":
+                continue # nie wysyłamy raportu zwolnienia toru, bo raportujemy sekcję
                 self._wyslij_tekst(
                     f"EVT:ZWO:{zdarzenie.get('pociag_id', '-')}:{zdarzenie.get('tor_id', '-')}:{czas_symulacji}"
                 )
@@ -308,19 +438,28 @@ class MostKomunikacjiUSB:
                 self._wyslij_tekst(
                     f"EVT:STP:{zdarzenie.get('pociag_id', '-')}:{zdarzenie.get('stacja_id', '-')}:{czas_symulacji}"
                 )
+            elif typ == "pociag_zatrzymal_sie_na_czerwonym":
+                self._wyslij_tekst(
+                    f"EVT:CZE_STP:{zdarzenie.get('pociag_id', '-')}:{zdarzenie.get('semafor_id', '-')}:{czas_symulacji}"
+                )
             elif typ == "pociag_odjechal_ze_stacji":
                 self._wyslij_tekst(
                     f"EVT:ODJ:{zdarzenie.get('pociag_id', '-')}:{zdarzenie.get('stacja_id', '-')}:{czas_symulacji}"
                 )
+            elif typ == "pociag_odjechal_z_czerwonego":
+                self._wyslij_tekst(
+                    f"EVT:CZE_ODJ:{zdarzenie.get('pociag_id', '-')}:{zdarzenie.get('semafor_id', '-')}:{czas_symulacji}"
+                )
             elif typ == "przejazd_na_czerwonym":
                 self._wyslij_tekst(
-                    f"EVT:RED:{zdarzenie.get('pociag_id', '-')}:{zdarzenie.get('semafor_id', '-')}:{czas_symulacji}"
+                    f"EVT:PRC:{zdarzenie.get('pociag_id', '-')}:{zdarzenie.get('semafor_id', '-')}:{czas_symulacji}"
                 )
             else:
                 self._wyslij_tekst(f"EVT:UNK:{typ}:{czas_symulacji}")
 
     def _zparsuj_komende(self, linia: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
         """
+        Parsowanie komendy z linii tekstowej.
         Zwraca: (komenda, kod_bledu).
         """
         czesci = [c.strip() for c in linia.split(":")]
@@ -398,9 +537,9 @@ class MostKomunikacjiUSB:
                 "active": czesci[1],
             }, None
 
-        if cmd == "SEC":
+        if cmd == "SEK":
             if len(czesci) < 2:
-                return None, "bledna_komenda_sec"
+                return None, "bledna_komenda_sek"
             return {
                 "cmd": "get_section",
                 "id": czesci[1],
@@ -447,6 +586,9 @@ class MostKomunikacjiUSB:
         return None, "nieznana_komenda"
 
     def obsluz_wejscie(self) -> None:
+        """
+        Obsługuje wejście z USB, odczytując linie i wykonując komendy.
+        """
         if not self.wlaczony or not self._serial:
             return
 
@@ -466,6 +608,9 @@ class MostKomunikacjiUSB:
             print(f"[WARN] Błąd odczytu z USB: {e}")
 
     def _wykonaj_komende(self, komenda: Dict[str, Any]) -> None:
+        """
+        Wykonuje komendę otrzymaną z USB.
+        """
         cmd = komenda.get("cmd")
 
         def odpowiedz_error(kod_bledu: str) -> None:
@@ -692,9 +837,9 @@ class MostKomunikacjiUSB:
 
             id_czola = pociag.id_zajetych_kafelkow[-1] if pociag.id_zajetych_kafelkow else "-"
             id_ogona = pociag.id_zajetych_kafelkow[0] if pociag.id_zajetych_kafelkow else "-"
-            sekcja_czola = self._sekcja_dla_toru.get(str(id_czola), "-")
-            sekcja_ogona = self._sekcja_dla_toru.get(str(id_ogona), "-")
-            self._odpowiedz_data_txt("SEC", id_pociagu, sekcja_czola, sekcja_ogona)
+            sekcja_czola = self._sekcja_dla_toru_lub_sasiedztwa(str(id_czola))
+            sekcja_ogona = self._sekcja_dla_toru_lub_sasiedztwa(str(id_ogona))
+            self._odpowiedz_data_txt("SEK", id_pociagu, sekcja_czola, sekcja_ogona)
             return
 
         if cmd == "get_free_space":
@@ -732,11 +877,51 @@ class MostKomunikacjiUSB:
                 str(len(zrzut["semafory"])),
                 str(len(zrzut["zwrotnice"])),
             )
+            self._wyslij_tekst(
+                "EVT:MAPA_SEKCJI:" + json.dumps(self._zbuduj_mape_sekcji_dla_kontrolera(), ensure_ascii=True, indent=None, separators=(",", ":"))
+            )
             return
 
         odpowiedz_error("nieznana_komenda")
 
+    def _zbuduj_mape_sekcji_dla_kontrolera(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Buduje uproszczoną mapę sekcji dla mikrokontrolera.
+        Zawiera: długość sekcji, id semaforów granicznych, połączenia do innych sekcji
+        wraz z informacją, który semafor i jakie zwrotnice prowadzą do danej sekcji,
+        oraz id stacji, jeśli sekcja zawiera stację.
+        """
+        mapa: Dict[str, Dict[str, Any]] = {}
+        for sekcja_id, dane in self._sekcje.items():
+            tory = list(dane.get("tory", []))
+            graniczne_semafory = list(dane.get("graniczne_semafory", []))
+            stacja_id = None
+            for id_stacji, stacja in self.graf.stacje.items():
+                if any(tor_id in tory for tor_id in stacja.id_torow):
+                    stacja_id = id_stacji
+                    break
+
+            polaczenia = []
+            for polaczenie in self._znajdz_polaczone_sekcje(sekcja_id):
+                polaczenia.append(polaczenie)
+
+            mapa[sekcja_id] = {
+                "id": sekcja_id,
+                "dlugosc": max(1, len(tory) + 2), # dodajemy 2, aby uwzględnić kafelki z semaforami granicznymi
+                "graniczne_semafory": graniczne_semafory,
+                "polaczenia": polaczenia,
+                "stacja_id": stacja_id,
+            }
+
+        #if config.DEBUG_MODE:
+        #    print(f"[DEBUG] Mapa sekcji dla kontrolera: {json.dumps(mapa, ensure_ascii=True, indent=None, separators=(',', ':'))}")
+
+        return mapa
+
     def _zrzut_stanu(self) -> Dict[str, Any]:
+        """
+        Zwraca zrzut stanu symulacji.
+        """
         pociagi = []
         for pociag in self.menedzer_pociagow.pociagi.values():
             pociagi.append(
@@ -778,3 +963,131 @@ class MostKomunikacjiUSB:
             "zwrotnice": zwrotnice,
             "sekcje": sekcje,
         }
+
+    def _wyznacz_wymagana_pozycje_zwrotnicy(
+        self,
+        id_poprzedniego_toru: str,
+        id_zwrotnicy: str,
+        id_nastepnego_toru: str,
+    ) -> Optional[str]:
+        """Wyznacza wymagana nastawe zwrotnicy dla przejscia poprzedni->zwrotnica->nastepny."""
+        zwrotnica = self.graf.zwrotnice.get(id_zwrotnicy)
+        poprzedni_wezel = self.graf.wezly.get(id_poprzedniego_toru)
+        if zwrotnica is None or poprzedni_wezel is None:
+            return None
+
+        pozycja_poczatkowa = zwrotnica.pozycja
+        try:
+            for pozycja in (Zwrot.PLUS, Zwrot.MINUS):
+                zwrotnica.pozycja = pozycja
+                for kierunek in Kierunek:
+                    przejscie_do_zwrotnicy = poprzedni_wezel.nastepny_wezel(kierunek, raportuj_awarie=False)
+                    if not przejscie_do_zwrotnicy:
+                        continue
+
+                    id_celu, kierunek_wejscia_zwrotnicy = przejscie_do_zwrotnicy
+                    if str(id_celu) != id_zwrotnicy:
+                        continue
+
+                    przejscie_ze_zwrotnicy = zwrotnica.nastepny_wezel(
+                        kierunek_wejscia_zwrotnicy,
+                        raportuj_awarie=False,
+                    )
+                    if not przejscie_ze_zwrotnicy:
+                        continue
+
+                    if str(przejscie_ze_zwrotnicy[0]) == id_nastepnego_toru:
+                        return pozycja.value
+        finally:
+            zwrotnica.pozycja = pozycja_poczatkowa
+
+        return None
+
+    def _wyznacz_nastawy_zwrotnic_dla_sciezki(self, sciezka_torow: List[str]) -> List[Dict[str, Optional[str]]]:
+        """Zwraca liste wymaganych nastaw zwrotnic dla przejscia po zadanej sciezce."""
+        nastawy: Dict[str, Dict[str, Optional[str]]] = {}
+
+        for idx in range(1, len(sciezka_torow) - 1):
+            id_biezacego = sciezka_torow[idx]
+            if id_biezacego not in self.graf.zwrotnice:
+                continue
+
+            id_poprzedniego = sciezka_torow[idx - 1]
+            id_nastepnego = sciezka_torow[idx + 1]
+            pozycja = self._wyznacz_wymagana_pozycje_zwrotnicy(
+                id_poprzedniego,
+                id_biezacego,
+                id_nastepnego,
+            )
+            if pozycja is None:
+                zwrotnica = self.graf.zwrotnice.get(id_biezacego)
+                pozycja = zwrotnica.pozycja.value if zwrotnica else None
+
+            nastawy[id_biezacego] = {
+                "id": id_biezacego,
+                "pozycja": pozycja,
+            }
+
+        return [nastawy[id_zwrotnicy] for id_zwrotnicy in sorted(nastawy)]
+
+    def _znajdz_polaczone_sekcje(self, id_sekcji: str) -> List[Dict[str, Any]]:
+        """
+        Zwraca listę połączeń z innymi sekcjami wraz z informacją, który semafor i
+        jakie zwrotnice są potrzebne, aby wejść do sekcji docelowej.
+        """
+        if id_sekcji not in self._sekcje:
+            return []
+
+        tory_sekcji = set(self._sekcje[id_sekcji]["tory"])
+        polaczone_sekcje: Dict[str, Dict[str, Any]] = {}
+        odwiedzone: set[str] = set()
+        kolejka: List[Tuple[str, List[str], Optional[str]]] = [
+            (id_toru, [id_toru], None) for id_toru in tory_sekcji
+        ]
+
+        semafory_na_torze: Dict[str, List[str]] = {}
+        for id_semafora, semafor in self.graf.semafory.items():
+            semafory_na_torze.setdefault(semafor.id_toru, []).append(id_semafora)
+
+        while kolejka:
+            id_toru, sciezka_torow, semafor_sciezki = kolejka.pop()
+            if id_toru in odwiedzone:
+                continue
+            odwiedzone.add(id_toru)
+
+            for sasiad in self._sasiedzi_torow.get(id_toru, set()):
+                if sasiad in odwiedzone:
+                    continue
+
+                sciezka_do_sasiada = list(sciezka_torow)
+                sciezka_do_sasiada.append(sasiad)
+
+                semafor_do_sasiada = semafor_sciezki
+                if semafor_do_sasiada is None:
+                    kandydaci = semafory_na_torze.get(id_toru, []) + semafory_na_torze.get(sasiad, [])
+                    semafor_do_sasiada = kandydaci[0] if kandydaci else None
+
+                sekcja_sasiada = self._sekcja_dla_toru.get(sasiad)
+                if sekcja_sasiada and sekcja_sasiada != id_sekcji:
+                    entry = polaczone_sekcje.setdefault(
+                        sekcja_sasiada,
+                        {
+                            "sekcja_docelowa": sekcja_sasiada,
+                            "semafor_id": None,
+                            "zwrotnice": [],
+                        },
+                    )
+                    if entry.get("semafor_id") is None:
+                        entry["semafor_id"] = semafor_do_sasiada
+
+                    if not entry.get("zwrotnice"):
+                        entry["zwrotnice"] = self._wyznacz_nastawy_zwrotnic_dla_sciezki(sciezka_do_sasiada)
+                    continue
+
+                if sasiad not in tory_sekcji:
+                    kolejka.append((sasiad, sciezka_do_sasiada, semafor_do_sasiada))
+
+        if config.DEBUG_MODE:
+            print(f"[DEBUG] Sekcja {id_sekcji} ma połączenia z sekcjami: {sorted(polaczone_sekcje)}")
+
+        return [polaczone_sekcje[sekcja_id] for sekcja_id in sorted(polaczone_sekcje)]

@@ -3,6 +3,7 @@ import sys
 import math
 import json
 from pathlib import Path
+from typing import Tuple
 import config
 from Loader import ConfigLoader
 from Graf import MenedzerGrafu
@@ -35,12 +36,29 @@ def _podpis_pociagow(pociagi: list) -> str:
     return json.dumps(pociagi, sort_keys=True, ensure_ascii=True)
 
 
+def _podpis_edytora(edytor: EdytorMapy) -> Tuple[int, str]:
+    return (
+        edytor.wersja_zmian,
+        _podpis_pociagow(edytor.projekt.get("pociagi", [])),
+    )
+
+
 def _zwolnij_kafelki_pociagu(graf: MenedzerGrafu, pociag: Pociag) -> None:
     for id_kafelka in pociag.id_zajetych_kafelkow:
         wezel = graf.wezly.get(id_kafelka)
         if wezel and wezel.pociag_id == pociag.id_pociagu:
             wezel.zajety = False
             wezel.pociag_id = None
+
+
+def _kierunek_startowy_z_danych(dane: dict) -> Kierunek:
+    nazwa_kierunku = str(dane.get("kierunek_startowy", Kierunek.ZACHOD.name)).strip().upper()
+    try:
+        return Kierunek[nazwa_kierunku]
+    except KeyError:
+        if config.DEBUG_MODE:
+            print(f"[DEBUG] Nieznany kierunek_startowy '{nazwa_kierunku}', uzywam ZACHOD")
+        return Kierunek.ZACHOD
 
 
 def _odtworz_pociagi_z_projektu(graf: MenedzerGrafu, skaler, menedzer_pociagow: MenedzerPociagow, dane_pociagow: list) -> None:
@@ -89,7 +107,8 @@ def _odtworz_pociagi_z_projektu(graf: MenedzerGrafu, skaler, menedzer_pociagow: 
             if not start_id:
                 continue
 
-            pociag.utworz_pociag(start_id, Kierunek.ZACHOD, graf)
+            kierunek_startowy = _kierunek_startowy_z_danych(dane)
+            pociag.utworz_pociag(start_id, kierunek_startowy, graf)
             menedzer_pociagow.dodaj_pociag(pociag, sledzenie)
         except (KeyError, TypeError, ValueError):
             continue
@@ -99,6 +118,32 @@ def _nastepny_sygnal(sygnal: Sygnal) -> Sygnal:
     kolejnosc = [Sygnal.CZERWONY, Sygnal.ZOLTY, Sygnal.ZIELONY, Sygnal.SZ]
     idx = kolejnosc.index(sygnal)
     return kolejnosc[(idx + 1) % len(kolejnosc)]
+
+
+def _wektor_kierunku(kierunek: Kierunek) -> tuple[float, float]:
+    mapa = {
+        Kierunek.POLNOC: (0.0, -1.0),
+        Kierunek.POLUDNIE: (0.0, 1.0),
+        Kierunek.WSCHOD: (1.0, 0.0),
+        Kierunek.ZACHOD: (-1.0, 0.0),
+        Kierunek.POLNOC_WSCHOD: (0.7, -0.7),
+        Kierunek.POLNOC_ZACHOD: (-0.7, -0.7),
+        Kierunek.POLUDNIE_WSCHOD: (0.7, 0.7),
+        Kierunek.POLUDNIE_ZACHOD: (-0.7, 0.7),
+    }
+    return mapa.get(kierunek, (0.0, -1.0))
+
+
+def _pozycja_semafora_na_ekranie(graf: MenedzerGrafu, silnik: SilnikGraficzny, semafor) -> tuple[float, float] | None:
+    wezel_toru = graf.wezly.get(getattr(semafor, "id_toru", ""))
+    if not wezel_toru:
+        return None
+
+    x_tor, y_tor = silnik.skaler.siatka_na_ekran(wezel_toru.x, wezel_toru.y)
+    x_sem, y_sem = silnik.swiat_na_ekran(x_tor, y_tor)
+    przes = max(6, int(round(10 * silnik.zoom)))
+    wx, wy = _wektor_kierunku(semafor.kierunek_sem)
+    return x_sem + wx * przes, y_sem + wy * przes
 
 
 def _obsluz_klik_symulacji(
@@ -114,13 +159,12 @@ def _obsluz_klik_symulacji(
 
     # 1) Najpierw semafory: klik blisko lampy.
     for semafor in graf.semafory.values():
-        wezel_toru = graf.wezly.get(semafor.id_toru)
-        if not wezel_toru:
+        pozycja_semafora = _pozycja_semafora_na_ekranie(graf, silnik, semafor)
+        if pozycja_semafora is None:
             continue
-        x_tor, y_tor = skaler.siatka_na_ekran(wezel_toru.x, wezel_toru.y)
-        x_sem = x_tor + 10
-        y_sem = y_tor - 10
-        if (x_world - x_sem) ** 2 + (y_world - y_sem) ** 2 <= 12 ** 2:
+        x_sem, y_sem = pozycja_semafora
+        promien_kliku = max(12, int(round(12 * silnik.zoom)))
+        if (x_world - x_sem) ** 2 + (y_world - y_sem) ** 2 <= promien_kliku ** 2:
             semafor.ustaw_sygnal(_nastepny_sygnal(semafor.sygnal))
             most_usb.wyslij_zdarzenie(
                 "semafor_zmieniony",
@@ -216,7 +260,7 @@ def main():
     zegar_pygame = py.time.Clock()
     edytor = EdytorMapy(projekt=loader.surowe_dane)
     pauza_przed_edytorem = False
-    podpis_pociagow = _podpis_pociagow(edytor.projekt.get("pociagi", []))
+    podpis_edytora = _podpis_edytora(edytor)
 
     dziala = True
     ostatnia_pozycja_pan = None
@@ -234,12 +278,18 @@ def main():
                 if zdarzenie.key == py.K_e or zdarzenie.key == py.K_F2:
                     aktywny = edytor.przelacz()
                     if aktywny:
-                        silnik.resetuj_widok()
+                        #silnik.resetuj_widok()
                         pauza_przed_edytorem = zegar.pauza
                         if not zegar.pauza:
                             zegar.przelacz_pauze()
                     elif zegar.pauza != pauza_przed_edytorem:
                         zegar.przelacz_pauze()
+                    continue
+                elif zdarzenie.key == py.K_KP0 or zdarzenie.key == py.K_0:
+                    silnik.resetuj_widok()
+                    continue
+                elif zdarzenie.key == py.K_ESCAPE:
+                    dziala = False
                     continue
 
                 if edytor.aktywny and edytor.obsluz_zdarzenie(
@@ -314,10 +364,15 @@ def main():
                 ):
                     continue
 
-        nowy_podpis = _podpis_pociagow(edytor.projekt.get("pociagi", []))
-        if nowy_podpis != podpis_pociagow:
-            _odtworz_pociagi_z_projektu(graf, skaler, menedzer_pociagow, edytor.projekt.get("pociagi", []))
-            podpis_pociagow = nowy_podpis
+        nowy_podpis = _podpis_edytora(edytor)
+        if nowy_podpis != podpis_edytora:
+            if nowy_podpis[0] != podpis_edytora[0]:
+                most_usb.odswiez_model_sekcji()
+
+            if nowy_podpis[1] != podpis_edytora[1]:
+                _odtworz_pociagi_z_projektu(graf, skaler, menedzer_pociagow, edytor.projekt.get("pociagi", []))
+
+            podpis_edytora = nowy_podpis
 
         symulowana_delta_czasu = 0.0 if edytor.aktywny else zegar.aktualizuj_czas(rzeczywista_delta_czasu)
         if not zegar.pauza and not edytor.aktywny:

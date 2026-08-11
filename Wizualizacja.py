@@ -5,7 +5,7 @@ import config
 from Graf import MenedzerGrafu
 from Menedzer_pociagow import MenedzerPociagow
 from Loader import Skaler
-from Wezly import WezelSemafora, WezelZwrotnicy, Sygnal, Zwrot
+from Wezly import Kierunek, WezelSemafora, WezelZwrotnicy, Sygnal, Zwrot, kierunek_przeciwny
 
 # Kolory
 KOLORY = {
@@ -17,6 +17,7 @@ KOLORY = {
     "POCIAG": (50, 150, 255),
     "STACJA": (100, 100, 200, 100),       # Z kanałem alpha
     "TEKST": (255, 255, 255),
+    "KIERUNEK": (0, 0, 0),
     Sygnal.CZERWONY: (255, 50, 50),
     Sygnal.ZIELONY: (50, 255, 50),
     Sygnal.ZOLTY: (255, 255, 50),
@@ -79,6 +80,52 @@ class SilnikGraficzny:
     def przesun_widok(self, dx: float, dy: float) -> None:
         self.przesuniecie_x += dx
         self.przesuniecie_y += dy
+
+    @staticmethod
+    def _wektor_kierunku(kierunek: Kierunek) -> Tuple[float, float]:
+        mapa = {
+            Kierunek.POLNOC: (0.0, -1.0),
+            Kierunek.POLUDNIE: (0.0, 1.0),
+            Kierunek.WSCHOD: (1.0, 0.0),
+            Kierunek.ZACHOD: (-1.0, 0.0),
+            Kierunek.POLNOC_WSCHOD: (0.7, -0.7),
+            Kierunek.POLNOC_ZACHOD: (-0.7, -0.7),
+            Kierunek.POLUDNIE_WSCHOD: (0.7, 0.7),
+            Kierunek.POLUDNIE_ZACHOD: (-0.7, 0.7),
+        }
+        return mapa.get(kierunek, (0.0, -1.0))
+
+    def _rysuj_wskaznik_kierunku(self, pozycja: Tuple[float, float], kierunek: Kierunek, kolor: Tuple[int, int, int]) -> None:
+        dx, dy = self._wektor_kierunku(kierunek)
+        norm = math.hypot(dx, dy) or 1.0
+        ux, uy = dx / norm, dy / norm
+        px_prostopadly, py_prostopadly = -uy, ux
+
+        cx, cy = pozycja
+        rozmiar = max(4, int(round(6 * self.zoom)))
+        tip_x = cx + ux * rozmiar
+        tip_y = cy + uy * rozmiar
+        base_x = cx - ux * rozmiar * 0.7
+        base_y = cy - uy * rozmiar * 0.7
+        p1 = (int(base_x + px_prostopadly * rozmiar * 0.55), int(base_y + py_prostopadly * rozmiar * 0.55))
+        p2 = (int(base_x - px_prostopadly * rozmiar * 0.55), int(base_y - py_prostopadly * rozmiar * 0.55))
+        tip = (int(tip_x), int(tip_y))
+        py.draw.polygon(self.ekran, kolor, [tip, p1, p2])
+
+    def _pozycja_semafora_na_ekranie(self, graf: MenedzerGrafu, semafor: WezelSemafora) -> Optional[Tuple[float, float]]:
+        wezel_toru = getattr(semafor, "id_toru", None)
+        if not wezel_toru:
+            return None
+
+        tor = graf.wezly.get(wezel_toru)
+        if tor is None:
+            return None
+
+        x_w, y_w = self.skaler.siatka_na_ekran(tor.x, tor.y)
+        x, y = self.swiat_na_ekran(x_w, y_w)
+        przes = max(6, int(round(10 * self.zoom)))
+        wx, wy = self._wektor_kierunku(semafor.kierunek_sem)
+        return x + wx * przes, y + wy * przes
 
     def rysuj_siatke(self, szerokosc: int, wysokosc: int) -> None:
         """Rysuje siatkę dzielącą przestrzeń na kafelki"""
@@ -253,17 +300,17 @@ class SilnikGraficzny:
                 tekst = self.czcionka.render(str(id_txt), True, KOLORY["TEKST"])
                 self.ekran.blit(tekst, (x_srodek - 10, y_srodek - 15))
 
-        # 3. Semafory
+    def rysuj_semafory(self, graf: MenedzerGrafu) -> None:
+        """Rysuje semafory jako warstwę nad pociągami."""
         for semafor in graf.semafory.values():
-            wezel_toru = graf.wezly.get(semafor.id_toru)
-            if wezel_toru:
-                x_w, y_w = self.skaler.siatka_na_ekran(wezel_toru.x, wezel_toru.y)
-                x, y = self.swiat_na_ekran(x_w, y_w)
+            pozycja = self._pozycja_semafora_na_ekranie(graf, semafor)
+            if pozycja:
                 kolor = KOLORY.get(semafor.sygnal, KOLORY["TEKST"])
                 promien = max(4, int(round(6 * self.zoom)))
-                przes = max(6, int(round(10 * self.zoom)))
-                py.draw.circle(self.ekran, kolor, (int(x + przes), int(y - przes)), promien)
-                py.draw.circle(self.ekran, (0, 0, 0), (int(x + przes), int(y - przes)), promien, max(1, int(round(self.zoom))))
+                x_sem, y_sem = pozycja
+                py.draw.circle(self.ekran, kolor, (int(x_sem), int(y_sem)), promien)
+                py.draw.circle(self.ekran, (0, 0, 0), (int(x_sem), int(y_sem)), promien, max(1, int(round(self.zoom))))
+                self._rysuj_wskaznik_kierunku((x_sem, y_sem), kierunek_przeciwny(semafor.kierunek_sem), KOLORY["KIERUNEK"])
 
     def rysuj_pociagi(self, menedzer_pociagow: MenedzerPociagow) -> None:
         """Rysuje pociągi na makiecie."""
@@ -303,6 +350,7 @@ class SilnikGraficzny:
         self.rysuj_siatke(szerokosc, wysokosc)
         self.rysuj_infrastrukture(graf)
         self.rysuj_pociagi(menedzer_pociagow)
+        self.rysuj_semafory(graf)
 
         if edytor is not None:
             edytor.rysuj_nakladke(
@@ -311,6 +359,7 @@ class SilnikGraficzny:
                 self.skaler,
                 self.czcionka,
                 self.czcionka_duza,
+                zoom=self.zoom,
                 swiat_na_ekran=self.swiat_na_ekran,
             )
 

@@ -51,6 +51,7 @@ class Pociag:
         self.uszkodzony: bool = False  # czy pociąg jest uszkodzony
         self.wymuszony_postoj: bool = False  # zatrzymanie ręczne w trybie symulacji
         self.zatrzymaj_na_koncu_biezacego_kafelka: bool = False  # precyzyjny postój na końcu toru/stacji
+        self.zatrzymany_na_czerwonym: bool = False  # czy pociąg zatrzymał się na czerwonym semaforze
 
     def utworz_pociag(self, id_pierwszego_kafelka: str, kierunek_wejscia: Kierunek, graf: MenedzerGrafu) -> None:
         """Umieszcza pociąg na podanym kafelku makiety"""
@@ -67,6 +68,9 @@ class Pociag:
         else:
             raise ValueError(f"Kafelek o ID '{id_pierwszego_kafelka}' nie istnieje w grafie.")
 
+    def _znajdz_semafor_dla_kierunku(self, graf: MenedzerGrafu, id_kafelka: str, kierunek: Kierunek) -> Optional[object]:
+        return graf.znajdz_semafor_dla_kierunku(id_kafelka, kierunek)
+
     def _czy_zatrzymac_na_koncu_biezacego_kafelka(self, graf: MenedzerGrafu) -> bool:
         if self.zatrzymaj_na_koncu_biezacego_kafelka:
             return True
@@ -75,26 +79,49 @@ class Pociag:
             return False
 
         id_kafelka_przodu = self.id_zajetych_kafelkow[-1]
-        semafor = graf.semafory_dla_wezlow.get((id_kafelka_przodu, self.aktualny_kierunek))
-        if not semafor:
+        semafor = self._znajdz_semafor_dla_kierunku(graf, id_kafelka_przodu, self.aktualny_kierunek)
+        if semafor:
+            if semafor.sygnal == Sygnal.CZERWONY:
+                return self._czy_moze_wyhamowac_na_biezacym_kafelku()
+            if semafor.sygnal == Sygnal.SZ:
+                if self.typ_pociagu.strip().upper() in {"TECHNICZNY", "TECH", "RATOWNICZY"}:
+                    return False
+                return self._czy_moze_wyhamowac_na_biezacym_kafelku()
+
+        wezel_przodu = graf.wezly.get(id_kafelka_przodu)
+        if not wezel_przodu:
             return False
 
-        if semafor.sygnal == Sygnal.CZERWONY:
-            return self._czy_moze_wyhamowac_na_biezacym_kafelku()
+        nastepny = wezel_przodu.nastepny_wezel(self.aktualny_kierunek, raportuj_awarie=False)
+        if not nastepny:
+            return False
 
-        if semafor.sygnal == Sygnal.SZ:
+        id_nastepnego_kafelka, kierunek_nastepnego = nastepny
+        semafor_nastepnika = self._znajdz_semafor_dla_kierunku(graf, id_nastepnego_kafelka, kierunek_nastepnego)
+        if not semafor_nastepnika:
+            return False
+
+        if semafor_nastepnika.sygnal == Sygnal.CZERWONY:
+            return self._czy_moze_wyhamowac_na_biezacym_kafelku()
+        if semafor_nastepnika.sygnal == Sygnal.SZ:
             if self.typ_pociagu.strip().upper() in {"TECHNICZNY", "TECH", "RATOWNICZY"}:
                 return False
             return self._czy_moze_wyhamowac_na_biezacym_kafelku()
 
         return False
 
-    def _czy_moze_wyhamowac_na_biezacym_kafelku(self) -> bool:
+    def _bezpieczny_dystans_hamowania_px(self) -> float:
         pozostaly_dystans_px = max(0.0, self.skaler.rozmiar_kafelka_px - self.dystans_w_kafelku_px)
+        return max(0.0, pozostaly_dystans_px - self.skaler.rozmiar_kafelka_px)
+
+    def _czy_moze_wyhamowac_na_biezacym_kafelku(self) -> bool:
         if self.efektywne_hamowanie_pxs2 <= 0.0:
             return False
+        bezpieczny_dystans_px = self._bezpieczny_dystans_hamowania_px()
+        if bezpieczny_dystans_px <= 0.0:
+            return False
         droga_hamowania_px = (self.predkosc_aktualna_pxs ** 2) / (2.0 * self.efektywne_hamowanie_pxs2)
-        return droga_hamowania_px <= pozostaly_dystans_px + 0.001
+        return droga_hamowania_px <= bezpieczny_dystans_px + 0.001
 
     def ustaw_kierunek_ruchu(self, nowy_kierunek: Kierunek, graf: MenedzerGrafu, sprawdz_przejazd: bool = True) -> bool:
         """Ustawia kierunek ruchu pociągu; opcjonalnie sprawdza, czy istnieje przejazd z czoła pociągu."""
@@ -126,9 +153,31 @@ class Pociag:
             if self.predkosc_aktualna_pxs < self.predkosc_docelowa_pxs:
                 self.predkosc_aktualna_pxs = self.predkosc_docelowa_pxs
 
-        # Jeśli pociąg stoi w miejscu, nie przeliczamy pozycji
-        if self.predkosc_aktualna_pxs == 0.0:
+        # Sprawdzenie czy pociąg zatrzymał się na czerwonym semaforze
+        if self.predkosc_aktualna_pxs == 0.0 and not self.zatrzymany_na_czerwonym:
+            if self.id_zajetych_kafelkow:
+                id_kafelka_przodu = self.id_zajetych_kafelkow[-1]
+                semafor_na_przodzie = self._znajdz_semafor_dla_kierunku(graf, id_kafelka_przodu, self.aktualny_kierunek)
+                if semafor_na_przodzie and semafor_na_przodzie.sygnal == Sygnal.CZERWONY:
+                    zdarzenia.append(("pociag_zatrzymal_sie_na_czerwonym", semafor_na_przodzie.id_semafora))
+                    self.zatrzymany_na_czerwonym = True
+                else:
+                    self.zatrzymany_na_czerwonym = False
+            else:
+                self.zatrzymany_na_czerwonym = False
+            return zdarzenia
+        # pociąg stoi
+        elif self.predkosc_aktualna_pxs == 0.0 and self.zatrzymany_na_czerwonym:
             return []
+
+        # Sprawdzenie czy pociąg odjechał z czerwonego semafora
+        if self.zatrzymany_na_czerwonym and self.predkosc_aktualna_pxs > 0.0:
+            if self.id_zajetych_kafelkow:
+                id_kafelka_przodu = self.id_zajetych_kafelkow[-1]
+                semafor_na_przodzie = self._znajdz_semafor_dla_kierunku(graf, id_kafelka_przodu, self.aktualny_kierunek)
+                if semafor_na_przodzie and (semafor_na_przodzie.sygnal == Sygnal.ZIELONY or semafor_na_przodzie.sygnal == Sygnal.ZOLTY):
+                    zdarzenia.append(("pociag_odjechal_z_czerwonego", semafor_na_przodzie.id_semafora))
+                    self.zatrzymany_na_czerwonym = False
 
         # Obliczanie przemieszczenia w pikselach dla aktualnej klatki symulacji
         przemieszczenie_px = self.predkosc_aktualna_pxs * delta_czasu_symulacji
@@ -140,7 +189,7 @@ class Pociag:
             id_kafelka_przodu = self.id_zajetych_kafelkow[-1] if self.id_zajetych_kafelkow else None
             semafor_na_przodzie = None
             if id_kafelka_przodu:
-                semafor_na_przodzie = graf.semafory_dla_wezlow.get((id_kafelka_przodu, self.aktualny_kierunek))
+                semafor_na_przodzie = self._znajdz_semafor_dla_kierunku(graf, id_kafelka_przodu, self.aktualny_kierunek)
 
             if semafor_na_przodzie and semafor_na_przodzie.sygnal == Sygnal.CZERWONY and not self._czy_moze_wyhamowac_na_biezacym_kafelku():
                 zdarzenia.append(("przejazd_na_czerwonym", semafor_na_przodzie.id_semafora))

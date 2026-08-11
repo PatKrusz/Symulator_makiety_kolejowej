@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, Optional, Tuple
 import config
-from Wezly import WezelGrafu, WezelZwrotnicy, WezelSemafora, ObszarStacji, Kierunek, Sygnal
+from Wezly import WezelGrafu, WezelZwrotnicy, WezelSemafora, ObszarStacji, Kierunek, Sygnal, kierunek_przeciwny
 
 class MenedzerGrafu:
     """
@@ -30,6 +30,51 @@ class MenedzerGrafu:
     def dodaj_stacje(self, stacja: ObszarStacji) -> None:
         """Dodaje stację do grafu."""
         self.stacje[stacja.id_stacji] = stacja
+
+    @staticmethod
+    def _wektor_kierunku(kierunek: Kierunek) -> tuple[float, float]:
+        mapa = {
+            Kierunek.POLNOC: (0.0, -1.0),
+            Kierunek.POLUDNIE: (0.0, 1.0),
+            Kierunek.WSCHOD: (1.0, 0.0),
+            Kierunek.ZACHOD: (-1.0, 0.0),
+            Kierunek.POLNOC_WSCHOD: (0.7, -0.7),
+            Kierunek.POLNOC_ZACHOD: (-0.7, -0.7),
+            Kierunek.POLUDNIE_WSCHOD: (0.7, 0.7),
+            Kierunek.POLUDNIE_ZACHOD: (-0.7, 0.7),
+        }
+        return mapa[kierunek]
+
+    def _czy_kierunek_semafora_zgodny(self, kierunek_pociagu: Kierunek, kierunek_semafora: Kierunek) -> bool:
+        if kierunek_pociagu == kierunek_semafora:
+            return True
+
+        if kierunek_przeciwny(kierunek_pociagu) == kierunek_semafora:
+            return False
+
+        wektor_pociagu = self._wektor_kierunku(kierunek_pociagu)
+        wektor_semafora = self._wektor_kierunku(kierunek_semafora)
+        iloczyn_skalarny = wektor_pociagu[0] * wektor_semafora[0] + wektor_pociagu[1] * wektor_semafora[1]
+
+        # Dopuszczamy zblizone kierunki (np. skos vs poziom), ale odrzucamy przeciwne.
+        return iloczyn_skalarny > 0.0
+
+    def znajdz_semafor_dla_kierunku(self, id_kafelka: str, kierunek: Kierunek) -> Optional[WezelSemafora]:
+        """Znajduje semafor sterujacy ruchem dla podanego toru i kierunku jazdy."""
+        semafor = self.semafory_dla_wezlow.get((id_kafelka, kierunek))
+        if semafor:
+            return semafor
+
+        semafory_na_torze = [
+            semafor_dla_toru
+            for (id_toru, _), semafor_dla_toru in self.semafory_dla_wezlow.items()
+            if id_toru == id_kafelka
+        ]
+        for semafor_dla_toru in semafory_na_torze:
+            if self._czy_kierunek_semafora_zgodny(kierunek, semafor_dla_toru.kierunek_sem):
+                return semafor_dla_toru
+
+        return None
 
     def znajdz_wezel_po_wspolrzednych(self, x: int, y: int) -> Optional[WezelGrafu]:
         """Zwraca węzeł znajdujący się na podanych współrzędnych siatki."""
@@ -278,7 +323,7 @@ class MenedzerGrafu:
                 return liczba_wolnych_kafelkow, "zajety_kafelek"
 
             # Sprawdzenie semafora na węźle
-            semafor = self.semafory_dla_wezlow.get((obecny_wezel_id, obecny_kierunek))
+            semafor = self.znajdz_semafor_dla_kierunku(obecny_wezel_id, obecny_kierunek)
             if semafor and semafor.sygnal == Sygnal.CZERWONY:
                 if config.DEBUG_MODE:
                     print(f"[DEBUG] Czerwony semafor '{semafor.id_semafora}' napotkany po {liczba_wolnych_kafelkow} wolnych kafelkach.")
@@ -306,7 +351,7 @@ class MenedzerGrafu:
         obecny_kierunek = kierunek_nadjezdzania
 
         for _ in range(zasieg):
-            semafor = self.semafory_dla_wezlow.get((id_obecny_wezel,obecny_kierunek))
+            semafor = self.znajdz_semafor_dla_kierunku(id_obecny_wezel, obecny_kierunek)
             if semafor:
                 return semafor.sygnal
 

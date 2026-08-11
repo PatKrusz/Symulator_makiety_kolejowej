@@ -72,6 +72,7 @@ class EdytorMapy:
         self._przycisk_rects: Dict[str, py.Rect] = {}
         self._lista_scroll: int = 0
         self._lista_widok_rect: Optional[py.Rect] = None
+        self._wersja_zmian: int = 0
 
         self.draft_station_tracks: List[str] = []
 
@@ -90,6 +91,13 @@ class EdytorMapy:
 
     def ustaw_komunikat(self, tresc: str, czas_zycia: int = 180) -> None:
         self.komunikat = EdytorKomunikat(tresc=tresc, licznik_klatek=czas_zycia)
+
+    def _oznacz_zmiane(self) -> None:
+        self._wersja_zmian += 1
+
+    @property
+    def wersja_zmian(self) -> int:
+        return self._wersja_zmian
 
     def _spadek_komunikatu(self) -> None:
         if self.komunikat.licznik_klatek > 0:
@@ -165,17 +173,20 @@ class EdytorMapy:
             self._przelicz_geometrie_zwrotnicy_z_polaczen(nowa)
             graf.usun_wezel(istniejący.id_wezel)
             graf.dodaj_wezel(nowa)
+            self._oznacz_zmiane()
             return nowa
 
         if jako_zwrotnica:
             nowy_id = self._nastepne_id("Z", list(graf.wezly.keys()))
             nowa = WezelZwrotnicy(nowy_id, x_siatka, y_siatka)
             graf.dodaj_wezel(nowa)
+            self._oznacz_zmiane()
             return nowa
 
         nowy_id = self._nastepne_id("T", list(graf.wezly.keys()))
         nowa = WezelGrafu(nowy_id, x_siatka, y_siatka)
         graf.dodaj_wezel(nowa)
+        self._oznacz_zmiane()
         return nowa
 
     def _dodaj_pelny_semafor(self, graf: MenedzerGrafu, tor_id: str) -> WezelSemafora:
@@ -184,6 +195,7 @@ class EdytorMapy:
         semafor = WezelSemafora(nowy_id, tor_id, Kierunek.ZACHOD)
         semafor.ustaw_sygnal(Sygnal.CZERWONY)
         graf.dodaj_semafor(semafor)
+        self._oznacz_zmiane()
         return semafor
 
     def _dodaj_lub_aktualizuj_stacje(self, graf: MenedzerGrafu) -> Optional[str]:
@@ -194,6 +206,7 @@ class EdytorMapy:
         if self.wybrany_rodzaj == "stacja" and self.wybrany_id and self.wybrany_id in graf.stacje:
             stacja = graf.stacje[self.wybrany_id]
             stacja.id_torow = list(self.draft_station_tracks)
+            self._oznacz_zmiane()
             if self.formularz:
                 self._wypelnij_formularz_dla_aktualnego(graf)
             return None
@@ -202,6 +215,7 @@ class EdytorMapy:
         stacja = ObszarStacji(nowy_id, nowa_nazwa, list(self.draft_station_tracks))
         graf.dodaj_stacje(stacja)
         self._licznik_nowych_stacji += 1
+        self._oznacz_zmiane()
         return None
 
     def _dodaj_pociag_do_projektu(self, x_siatka: int, y_siatka: int) -> Dict[str, Any]:
@@ -215,10 +229,12 @@ class EdytorMapy:
             "masa": 1.0,
             "dlugosc": 2,
             "pozycja_startowa": {"x": x_siatka, "y": y_siatka},
+            "kierunek_startowy": Kierunek.ZACHOD.name,
             "rozklad": [],
         }
         self.projekt["pociagi"].append(pociag)
         self._licznik_nowych_pociagow += 1
+        self._oznacz_zmiane()
         return pociag
 
     def _znajdz_pociag_index(self) -> Optional[int]:
@@ -311,6 +327,7 @@ class EdytorMapy:
                 PoleFormularza("dlugosc", "Dlugosc", "int", str(obiekt.get("dlugosc", 2))),
                 PoleFormularza("start_x", "Start X", "int", str(obiekt.get("pozycja_startowa", {}).get("x", 0))),
                 PoleFormularza("start_y", "Start Y", "int", str(obiekt.get("pozycja_startowa", {}).get("y", 0))),
+                PoleFormularza("kierunek_startowy", "Kier. start", "choice", str(obiekt.get("kierunek_startowy", Kierunek.ZACHOD.name)), [e.name for e in Kierunek]),
                 PoleFormularza("rozklad", "Rozklad", "text", self._rozklad_do_tekstu(obiekt.get("rozklad", []))),
             ]
 
@@ -389,6 +406,7 @@ class EdytorMapy:
                                 semafor.id_toru = nowa_id
                         for stacja in graf.stacje.values():
                             stacja.id_torow = [nowa_id if t == stary_id else t for t in stacja.id_torow]
+                    self._oznacz_zmiane()
                 elif self.wybrany_rodzaj == "semafor":
                     if nowa_id != obiekt.id_semafora and nowa_id in graf.semafory:
                         return "Takie ID juz istnieje."
@@ -398,77 +416,94 @@ class EdytorMapy:
                     for klucz, semafor in list(graf.semafory_dla_wezlow.items()):
                         if semafor.id_semafora == stary_id:
                             graf.semafory_dla_wezlow[klucz] = obiekt
+                    self._oznacz_zmiane()
                 elif self.wybrany_rodzaj == "stacja":
                     if nowa_id != obiekt.id_stacji and nowa_id in graf.stacje:
                         return "Takie ID juz istnieje."
                     stary_id = obiekt.id_stacji
                     obiekt.id_stacji = nowa_id
                     graf.stacje[nowa_id] = graf.stacje.pop(stary_id)
+                    self._oznacz_zmiane()
                 elif self.wybrany_rodzaj == "pociag":
                     idx = self._znajdz_pociag_index()
                     if idx is None:
                         return "Brak wybranego pociagu."
                     obiekt["id"] = nowa_id
+                    self._oznacz_zmiane()
                 return None
 
             if pole.klucz in {"x", "y", "start_x", "start_y"}:
                 wartosc_int = int(wartosc)
                 if self.wybrany_rodzaj in {"wezel", "zwrotnica"}:
                     setattr(obiekt, pole.klucz, wartosc_int)
+                    self._oznacz_zmiane()
                 elif self.wybrany_rodzaj == "pociag":
                     if pole.klucz == "start_x":
                         obiekt["pozycja_startowa"]["x"] = wartosc_int
                     else:
                         obiekt["pozycja_startowa"]["y"] = wartosc_int
+                    self._oznacz_zmiane()
                 return None
 
             if pole.klucz in {"masa", "max_predkosc_kmh", "przyspieszenie_bazowe", "hamowanie_bazowe"}:
                 wartosc_float = float(wartosc)
                 if self.wybrany_rodzaj == "pociag":
                     obiekt[pole.klucz] = wartosc_float
+                    self._oznacz_zmiane()
                 return None
 
             if pole.klucz == "dlugosc" and self.wybrany_rodzaj == "pociag":
                 obiekt["dlugosc"] = int(wartosc)
+                self._oznacz_zmiane()
                 return None
 
             if self.wybrany_rodzaj == "zwrotnica" and pole.klucz == "pozycja":
                 obiekt.ustaw_pozycje(Zwrot[wartosc])
+                self._oznacz_zmiane()
                 return None
 
             if self.wybrany_rodzaj == "zwrotnica" and pole.klucz in {"kierunek_glowny", "kierunek_zwrotny_plus", "kierunek_zwrotny_minus"}:
                 kierunek_val = None if wartosc == "-" else Kierunek[wartosc]
                 setattr(obiekt, pole.klucz, kierunek_val)
+                self._oznacz_zmiane()
                 return None
 
             if self.wybrany_rodzaj == "zwrotnica" and pole.klucz == "stan_awaryjny":
                 obiekt.stan_awaryjny = wartosc == "TAK"
+                self._oznacz_zmiane()
                 return None
 
             if self.wybrany_rodzaj == "semafor":
                 if pole.klucz == "id_toru":
                     obiekt.id_toru = wartosc.strip()
+                    self._oznacz_zmiane()
                     return None
                 if pole.klucz == "kierunek_sem":
                     obiekt.kierunek_sem = Kierunek[wartosc]
+                    self._oznacz_zmiane()
                     return None
                 if pole.klucz == "sygnal":
                     obiekt.ustaw_sygnal(Sygnal[wartosc])
+                    self._oznacz_zmiane()
                     return None
 
             if self.wybrany_rodzaj == "stacja":
                 if pole.klucz == "nazwa":
                     obiekt.nazwa_stacji = wartosc.strip()
+                    self._oznacz_zmiane()
                     return None
                 if pole.klucz == "id_torow":
                     obiekt.id_torow = [element.strip() for element in wartosc.split(",") if element.strip()]
+                    self._oznacz_zmiane()
                     return None
 
             if self.wybrany_rodzaj == "pociag":
                 if pole.klucz == "rozklad":
                     obiekt["rozklad"] = self._rozklad_z_tekstu(wartosc)
+                    self._oznacz_zmiane()
                     return None
                 obiekt[pole.klucz] = wartosc.strip()
+                self._oznacz_zmiane()
                 return None
 
         except Exception as exc:
@@ -768,6 +803,8 @@ class EdytorMapy:
         else:
             wezel.polaczenia.clear()
 
+        self._oznacz_zmiane()
+
         # Usuń połączenia przychodzące z innych węzłów.
         for inny in graf.wezly.values():
             if isinstance(inny, WezelZwrotnicy):
@@ -787,6 +824,7 @@ class EdytorMapy:
             self.wybrany_id = None
             self.wybrany_rodzaj = None
             self.formularz = []
+            self._oznacz_zmiane()
             return True
 
         if self.wybrany_rodzaj == "semafor" and self.wybrany_id:
@@ -797,6 +835,7 @@ class EdytorMapy:
             self.wybrany_id = None
             self.wybrany_rodzaj = None
             self.formularz = []
+            self._oznacz_zmiane()
             return True
 
         if self.wybrany_rodzaj == "stacja" and self.wybrany_id:
@@ -804,6 +843,7 @@ class EdytorMapy:
             self.wybrany_id = None
             self.wybrany_rodzaj = None
             self.formularz = []
+            self._oznacz_zmiane()
             return True
 
         if self.wybrany_rodzaj == "pociag" and self.wybrany_pociag_id is not None:
@@ -812,6 +852,7 @@ class EdytorMapy:
             self.wybrany_pociag_id = None
             self.wybrany_rodzaj = None
             self.formularz = []
+            self._oznacz_zmiane()
             return True
 
         return False
@@ -1067,11 +1108,26 @@ class EdytorMapy:
     def _przyciski_draft_station(self) -> Dict[str, py.Rect]:
         return self._przycisk_rects
 
+    @staticmethod
+    def _wektor_kierunku(kierunek: Kierunek) -> Tuple[float, float]:
+        mapa = {
+            Kierunek.POLNOC: (0.0, -1.0),
+            Kierunek.POLUDNIE: (0.0, 1.0),
+            Kierunek.WSCHOD: (1.0, 0.0),
+            Kierunek.ZACHOD: (-1.0, 0.0),
+            Kierunek.POLNOC_WSCHOD: (0.7, -0.7),
+            Kierunek.POLNOC_ZACHOD: (-0.7, -0.7),
+            Kierunek.POLUDNIE_WSCHOD: (0.7, 0.7),
+            Kierunek.POLUDNIE_ZACHOD: (-0.7, 0.7),
+        }
+        return mapa.get(kierunek, (0.0, -1.0))
+
     def _podswietl_wybrany_na_mapie(
         self,
         ekran: py.Surface,
         graf: MenedzerGrafu,
         skaler: Skaler,
+        zoom: float = 1.0,
         swiat_na_ekran: Optional[Callable[[float, float], Tuple[float, float]]] = None,
     ) -> None:
         def _mapuj(x: float, y: float) -> Tuple[float, float]:
@@ -1093,7 +1149,12 @@ class EdytorMapy:
                 tor = graf.wezly[semafor.id_toru]
                 x_w, y_w = skaler.siatka_na_ekran(tor.x, tor.y)
                 x, y = _mapuj(x_w, y_w)
-                py.draw.circle(ekran, AKCENT, (int(x + 10), int(y - 10)), 10, 2)
+                przes = max(6, int(round(10 * zoom)))
+                promien = max(4, int(round(6 * zoom)))
+                wx, wy = self._wektor_kierunku(semafor.kierunek_sem)
+                x_sem = x + wx * przes
+                y_sem = y + wy * przes
+                py.draw.circle(ekran, AKCENT, (int(x_sem), int(y_sem)), promien, 2)
             return
 
         if self.wybrany_rodzaj == "pociag" and self.wybrany_pociag_id is not None:
@@ -1124,13 +1185,14 @@ class EdytorMapy:
         skaler: Skaler,
         czcionka: py.font.Font,
         czcionka_duza: py.font.Font,
+        zoom: float = 1.0,
         swiat_na_ekran: Optional[Callable[[float, float], Tuple[float, float]]] = None,
     ) -> None:
         if not self.aktywny:
             self._spadek_komunikatu()
             return
 
-        self._podswietl_wybrany_na_mapie(ekran, graf, skaler, swiat_na_ekran)
+        self._podswietl_wybrany_na_mapie(ekran, graf, skaler, zoom, swiat_na_ekran)
 
         szer, wys = ekran.get_size()
         panel_x = max(0, szer - PANEL_SZEROKOSC)
