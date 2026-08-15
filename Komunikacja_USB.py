@@ -65,7 +65,7 @@ class MostKomunikacjiUSB:
         wlaczony: bool = False,
         port: Optional[str] = None,
         baudrate: int = 115200,
-        timeout: float = 0.0,
+        timeout: float = 0.05,
     ):
         self.graf = graf
         self.menedzer_pociagow = menedzer_pociagow
@@ -84,6 +84,18 @@ class MostKomunikacjiUSB:
         self._zbuduj_model_sekcji()
 
         #self._zbuduj_mape_sekcji_dla_kontrolera()
+        if config.DEBUG_MODE:
+            #print(json.dumps(self._zbuduj_mape_sekcji_dla_kontrolera(), ensure_ascii=True, indent=None, separators=(",", ":")))
+            #zrzut = self._zrzut_stanu()
+            #tylko lista kluczy
+            #print("[DEBUG] Lista pociagow", json.dumps(zrzut.get("pociagi", ""), ensure_ascii=True, indent=None, separators=(",", ":")))
+            #print("[DEBUG] Lista sekcji", json.dumps(zrzut.get("sekcje", ""), ensure_ascii=True, indent=None, separators=(",", ":")))
+            #print("[DEBUG] Lista semaforow", json.dumps(zrzut.get("semafory", ""), ensure_ascii=True, indent=None, separators=(",", ":")))
+            #print("[DEBUG] Lista zwrotnic", json.dumps(zrzut.get("zwrotnice", ""), ensure_ascii=True, indent=None, separators=(",", ":")))
+
+            self._wykonaj_komende({"cmd": "snapshot"})
+            self._wykonaj_komende({"cmd": "get_section", "id": "P01"})
+            self._wykonaj_komende({"cmd": "get_switch", "id": "T22"})
 
         if self.wlaczony:
             self._otworz_port()
@@ -148,9 +160,13 @@ class MostKomunikacjiUSB:
 
     def _odpowiedz_ok_txt(self, *pola: str) -> None:
         self._wyslij_tekst("OK:" + ":".join(pola))
+        #if config.DEBUG_MODE:
+        #    print(f"[DEBUG] Odpowiedź OK: {':'.join(pola)}")
 
     def _odpowiedz_data_txt(self, *pola: str) -> None:
         self._wyslij_tekst("DAT:" + ":".join(pola))
+        #if config.DEBUG_MODE:
+        #    print(f"[DEBUG] Odpowiedź DAT: {':'.join(pola)}")
 
     def _zbuduj_sasiedztwo_torow(self) -> Dict[str, set[str]]:
         """
@@ -281,7 +297,7 @@ class MostKomunikacjiUSB:
                 graniczne_lista[0] if graniczne_lista else "END"
             )
 
-            id_sekcji = f"SEK:{start_semafor}->{koniec_semafor}:{numer_sekcji:02d}"
+            id_sekcji = str(numer_sekcji)
             self._sekcje[id_sekcji] = {
                 "id": id_sekcji,
                 "start_semafor": start_semafor,
@@ -321,7 +337,7 @@ class MostKomunikacjiUSB:
             return "-", "-", "-"
 
         return (
-            przystanek.id_stacji,
+            przystanek.nazwa_stacji,
             str(przystanek.czas_przyjazdu or "-"),
             str(przystanek.czas_odjazdu or "-"),
         )
@@ -352,20 +368,36 @@ class MostKomunikacjiUSB:
         if not id_pociagu or not id_sekcji or id_sekcji == "-":
             return
 
-        poprzednia_sekcja = self._aktualna_sekcja_pociagu.get(id_pociagu)
-        if poprzednia_sekcja and poprzednia_sekcja == id_sekcji:
-            return
+        zajetosc = self._zajetosc_sekcji_pociagow.setdefault(id_pociagu, {})
+        licznik_przed = int(zajetosc.get(id_sekcji, 0))
 
-        self._aktualna_sekcja_pociagu[id_pociagu] = id_sekcji
-        if poprzednia_sekcja:
-            self._wyslij_tekst(f"EVT:SEK_WYJ:{id_pociagu}:{poprzednia_sekcja}:{czas_symulacji}")
-            self._wyslij_tekst(f"EVT:SEK_WJA:{id_pociagu}:{id_sekcji}:{czas_symulacji}")
-            return
+        if typ == "tor_zajety":
+            licznik_po = licznik_przed + 1
+            zajetosc[id_sekcji] = licznik_po
 
-        self._wyslij_tekst(f"EVT:SEK_WJA:{id_pociagu}:{id_sekcji}:{czas_symulacji}")
+            # Raport wjazdu tylko przy przejściu 0->1 (pierwszy wagon w sekcji).
+            if licznik_przed == 0:
+                self._wyslij_tekst(f"EVT:SEK_WJA:{id_pociagu}:{id_sekcji}:{czas_symulacji}")
+        else:
+            if licznik_przed <= 0:
+                return
 
-        if config.DEBUG_MODE:
-            print(f"[DEBUG] Sekcja dla pociągu {id_pociagu}: {poprzednia_sekcja} -> {id_sekcji}")
+            licznik_po = licznik_przed - 1
+            if licznik_po > 0:
+                zajetosc[id_sekcji] = licznik_po
+            else:
+                zajetosc.pop(id_sekcji, None)
+                # Raport wyjazdu tylko przy przejściu 1->0 (ostatni wagon opuszcza sekcję).
+                self._wyslij_tekst(f"EVT:SEK_WYJ:{id_pociagu}:{id_sekcji}:{czas_symulacji}")
+
+        if zajetosc:
+            self._aktualna_sekcja_pociagu[id_pociagu] = sorted(zajetosc.keys())[0]
+        else:
+            self._aktualna_sekcja_pociagu.pop(id_pociagu, None)
+            self._zajetosc_sekcji_pociagow.pop(id_pociagu, None)
+
+        #if config.DEBUG_MODE:
+        #    print(f"[DEBUG] Sekcje pociagu {id_pociagu}: {zajetosc}")
 
     def wyslij_zdarzenie(self, typ: str, payload: Dict[str, Any]) -> None:
         """
@@ -889,7 +921,7 @@ class MostKomunikacjiUSB:
         Buduje uproszczoną mapę sekcji dla mikrokontrolera.
         Zawiera: długość sekcji, id semaforów granicznych, połączenia do innych sekcji
         wraz z informacją, który semafor i jakie zwrotnice prowadzą do danej sekcji,
-        oraz id stacji, jeśli sekcja zawiera stację.
+        oraz id oraz nazwę stacji, jeśli sekcja zawiera stację.
         """
         mapa: Dict[str, Dict[str, Any]] = {}
         for sekcja_id, dane in self._sekcje.items():
@@ -910,7 +942,10 @@ class MostKomunikacjiUSB:
                 "dlugosc": max(1, len(tory) + 2), # dodajemy 2, aby uwzględnić kafelki z semaforami granicznymi
                 "graniczne_semafory": graniczne_semafory,
                 "polaczenia": polaczenia,
-                "stacja_id": stacja_id,
+                "stacja": {
+                    "id": stacja_id,
+                    "nazwa": self.graf.stacje[stacja_id].nazwa_stacji if stacja_id else None,
+                },
             }
 
         #if config.DEBUG_MODE:

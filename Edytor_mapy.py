@@ -14,6 +14,8 @@ from Wezly import Kierunek, ObszarStacji, Sygnal, WezelGrafu, WezelSemafora, Wez
 PANEL_SZEROKOSC = 420
 TOOLBAR_WYSOKOSC = 34
 WIERSZ_WYSOKOSC = 24
+ROZKLAD_WIDOCZNE_WIERSZE = 4
+WLASCIWOSCI_SCROLL_KROK = 28
 NAPIS_KOLOR = (245, 245, 245)
 TLO_PANELU = (16, 18, 24)
 TLO_SEKCJI = (28, 32, 42)
@@ -45,6 +47,7 @@ class EdytorMapy:
         self.aktywny: bool = False
         self.tryb: str = "select"
         self.branch_mode: str = "PLUS"
+        self.branch_mode_docelowy: str = "PLUS"
         self.wybrany_rodzaj: Optional[str] = None
         self.wybrany_id: Optional[str] = None
         self.wybrany_pociag_id: Optional[int] = None
@@ -54,6 +57,7 @@ class EdytorMapy:
         self._licznik_nowych_pociagow = 1
         self._drag_start_node: Optional[str] = None
         self._szybkie_laczenie_start: Optional[str] = None
+        self.wybrany_rozklad_wiersz: int = 0
 
         self.projekt: Dict[str, Any] = copy.deepcopy(projekt) if projekt else {}
         self.projekt.setdefault("ustawienia_symulacji", {})
@@ -70,6 +74,12 @@ class EdytorMapy:
         self._lista_rects: List[Tuple[str, str, int, py.Rect]] = []
         self._pole_rects: List[py.Rect] = []
         self._przycisk_rects: Dict[str, py.Rect] = {}
+        self._rozklad_wiersze_rects: List[Tuple[int, py.Rect]] = []
+        self._rozklad_widok_rect: Optional[py.Rect] = None
+        self._rozklad_scroll: int = 0
+        self._wlasciwosci_widok_rect: Optional[py.Rect] = None
+        self._wlasciwosci_scroll: int = 0
+        self._wlasciwosci_wysokosc_tresci: int = 0
         self._lista_scroll: int = 0
         self._lista_widok_rect: Optional[py.Rect] = None
         self._wersja_zmian: int = 0
@@ -85,9 +95,22 @@ class EdytorMapy:
         self.formularz = []
         self.aktywne_pole = -1
         self.bufor_tekstu = ""
+        self.wybrany_rozklad_wiersz = 0
+        self._rozklad_scroll = 0
+        self._wlasciwosci_scroll = 0
         self._szybkie_laczenie_start = None
         self.ustaw_komunikat(f"Tryb edycji: {'wlaczony' if self.aktywny else 'wylaczony'}")
         return self.aktywny
+
+    def _przewin_wlasciwosci(self, delta: int) -> bool:
+        if self._wlasciwosci_widok_rect is None:
+            return False
+
+        widoczna_wysokosc = max(1, self._wlasciwosci_widok_rect.height)
+        max_scroll = max(0, self._wlasciwosci_wysokosc_tresci - widoczna_wysokosc)
+        poprzedni = self._wlasciwosci_scroll
+        self._wlasciwosci_scroll = max(0, min(max_scroll, self._wlasciwosci_scroll + delta))
+        return self._wlasciwosci_scroll != poprzedni
 
     def ustaw_komunikat(self, tresc: str, czas_zycia: int = 180) -> None:
         self.komunikat = EdytorKomunikat(tresc=tresc, licznik_klatek=czas_zycia)
@@ -261,13 +284,15 @@ class EdytorMapy:
         self.wybrany_rodzaj = kind
         self.wybrany_id = ident if isinstance(ident, str) else None
         self.wybrany_pociag_id = ident if kind == "pociag" and isinstance(ident, int) else None
-        self._wypelnij_formularz_dla_aktualnego(graf)
+        self._wypelnij_formularz_dla_aktualnego(graf, reset_scroll=True)
 
-    def _wypelnij_formularz_dla_aktualnego(self, graf: MenedzerGrafu) -> None:
+    def _wypelnij_formularz_dla_aktualnego(self, graf: MenedzerGrafu, reset_scroll: bool = False) -> None:
         obiekt = self._aktualny_obiekt(graf)
         self.formularz = []
         self.aktywne_pole = -1
         self.bufor_tekstu = ""
+        if reset_scroll:
+            self._wlasciwosci_scroll = 0
 
         if obiekt is None:
             return
@@ -328,50 +353,65 @@ class EdytorMapy:
                 PoleFormularza("start_x", "Start X", "int", str(obiekt.get("pozycja_startowa", {}).get("x", 0))),
                 PoleFormularza("start_y", "Start Y", "int", str(obiekt.get("pozycja_startowa", {}).get("y", 0))),
                 PoleFormularza("kierunek_startowy", "Kier. start", "choice", str(obiekt.get("kierunek_startowy", Kierunek.ZACHOD.name)), [e.name for e in Kierunek]),
-                PoleFormularza("rozklad", "Rozklad", "text", self._rozklad_do_tekstu(obiekt.get("rozklad", []))),
             ]
+            self._odswiez_pola_rozkladu(graf, obiekt)
 
-    def _rozklad_do_tekstu(self, rozklad: List[Dict[str, Any]]) -> str:
+    @staticmethod
+    def _normalizuj_wiersz_rozkladu(wiersz: Dict[str, Any]) -> Dict[str, Any]:
+        nazwa_stacji = str(wiersz.get("nazwa_stacji") or wiersz.get("id_stacji") or "").strip()
+        czas_postoju = float(wiersz.get("czas_postoju", 30.0))
+        przyjazd = str(wiersz.get("przyjazd") or "").strip() or None
+        odjazd = str(wiersz.get("odjazd") or "").strip() or None
+        return {
+            "nazwa_stacji": nazwa_stacji,
+            # Klucz utrzymany dla kompatybilności ze starszym formatem.
+            "id_stacji": nazwa_stacji,
+            "czas_postoju": czas_postoju,
+            "przyjazd": przyjazd,
+            "odjazd": odjazd,
+        }
+
+    def _normalizuj_rozklad_pociagu(self, obiekt: Dict[str, Any]) -> List[Dict[str, Any]]:
+        surowy = obiekt.get("rozklad", [])
+        wynik: List[Dict[str, Any]] = []
+        for wiersz in surowy if isinstance(surowy, list) else []:
+            if isinstance(wiersz, dict):
+                wynik.append(self._normalizuj_wiersz_rozkladu(wiersz))
+        obiekt["rozklad"] = wynik
+        return wynik
+
+    def _nazwy_stacji(self, graf: MenedzerGrafu) -> List[str]:
+        nazwy = sorted({stacja.nazwa_stacji.strip() for stacja in graf.stacje.values() if stacja.nazwa_stacji.strip()})
+        if nazwy:
+            return nazwy
+        return sorted({stacja.id_stacji.strip() for stacja in graf.stacje.values() if stacja.id_stacji.strip()})
+
+    def _odswiez_pola_rozkladu(self, graf: MenedzerGrafu, obiekt: Dict[str, Any]) -> None:
+        klucze_rozkladu = {"rk_stacja", "rk_postoj", "rk_przyjazd", "rk_odjazd"}
+        self.formularz = [pole for pole in self.formularz if pole.klucz not in klucze_rozkladu]
+
+        rozklad = self._normalizuj_rozklad_pociagu(obiekt)
         if not rozklad:
-            return ""
+            self.wybrany_rozklad_wiersz = 0
+            self._rozklad_scroll = 0
+            return
 
-        fragmenty = []
-        for przystanek in rozklad:
-            przyjazd = przystanek.get("przyjazd") or ""
-            odjazd = przystanek.get("odjazd") or ""
-            fragmenty.append(
-                "|".join(
-                    [
-                        str(przystanek.get("id_stacji", "")),
-                        str(przystanek.get("czas_postoju", 30)),
-                        str(przyjazd),
-                        str(odjazd),
-                    ]
-                )
-            )
-        return "; ".join(fragmenty)
+        self.wybrany_rozklad_wiersz = max(0, min(self.wybrany_rozklad_wiersz, len(rozklad) - 1))
+        max_scroll = max(0, len(rozklad) - ROZKLAD_WIDOCZNE_WIERSZE)
+        self._rozklad_scroll = max(0, min(self._rozklad_scroll, max_scroll))
+        aktywny = rozklad[self.wybrany_rozklad_wiersz]
+        nazwy_stacji = self._nazwy_stacji(graf)
+        if aktywny["nazwa_stacji"] and aktywny["nazwa_stacji"] not in nazwy_stacji:
+            nazwy_stacji.append(aktywny["nazwa_stacji"])
 
-    def _rozklad_z_tekstu(self, tekst: str) -> List[Dict[str, Any]]:
-        rozklad: List[Dict[str, Any]] = []
-        for fragment in [czesc.strip() for czesc in tekst.split(";") if czesc.strip()]:
-            pola = [pole.strip() for pole in fragment.split("|")]
-            if not pola or not pola[0]:
-                continue
-
-            czas_postoju = 30.0
-            if len(pola) >= 2 and pola[1]:
-                czas_postoju = float(pola[1])
-
-            rozklad.append(
-                {
-                    "id_stacji": pola[0],
-                    "czas_postoju": czas_postoju,
-                    "przyjazd": pola[2] if len(pola) >= 3 and pola[2] else None,
-                    "odjazd": pola[3] if len(pola) >= 4 and pola[3] else None,
-                }
-            )
-
-        return rozklad
+        self.formularz.extend(
+            [
+                PoleFormularza("rk_stacja", "Stacja", "choice", str(aktywny.get("nazwa_stacji", "")), nazwy_stacji),
+                PoleFormularza("rk_postoj", "Postoj [s]", "float", str(aktywny.get("czas_postoju", 30.0))),
+                PoleFormularza("rk_przyjazd", "Przyjazd", "text", str(aktywny.get("przyjazd") or "")),
+                PoleFormularza("rk_odjazd", "Odjazd", "text", str(aktywny.get("odjazd") or "")),
+            ]
+        )
 
     def _ustaw_wartosc_pola(self, graf: MenedzerGrafu, pole: PoleFormularza, wartosc: str) -> Optional[str]:
         obiekt = self._aktualny_obiekt(graf)
@@ -498,8 +538,25 @@ class EdytorMapy:
                     return None
 
             if self.wybrany_rodzaj == "pociag":
-                if pole.klucz == "rozklad":
-                    obiekt["rozklad"] = self._rozklad_z_tekstu(wartosc)
+                if pole.klucz in {"rk_stacja", "rk_postoj", "rk_przyjazd", "rk_odjazd"}:
+                    rozklad = self._normalizuj_rozklad_pociagu(obiekt)
+                    if not rozklad:
+                        return "Rozklad jest pusty. Dodaj pierwszy przystanek przyciskiem '+ Dodaj wiersz'."
+                    idx = max(0, min(self.wybrany_rozklad_wiersz, len(rozklad) - 1))
+                    wiersz = rozklad[idx]
+                    if pole.klucz == "rk_stacja":
+                        nazwa = wartosc.strip()
+                        wiersz["nazwa_stacji"] = nazwa
+                        wiersz["id_stacji"] = nazwa
+                    elif pole.klucz == "rk_postoj":
+                        wiersz["czas_postoju"] = float(wartosc)
+                    elif pole.klucz == "rk_przyjazd":
+                        txt = wartosc.strip()
+                        wiersz["przyjazd"] = txt if txt else None
+                    elif pole.klucz == "rk_odjazd":
+                        txt = wartosc.strip()
+                        wiersz["odjazd"] = txt if txt else None
+                    self._odswiez_pola_rozkladu(graf, obiekt)
                     self._oznacz_zmiane()
                     return None
                 obiekt[pole.klucz] = wartosc.strip()
@@ -542,6 +599,70 @@ class EdytorMapy:
             return False
         panel_x = min(rect.x for rect in self._toolbar_rects.values())
         return pos[0] >= panel_x
+
+    def _wybierz_wiersz_rozkladu_po_kliknieciu(self, pos: Tuple[int, int], graf: MenedzerGrafu) -> bool:
+        if self.wybrany_rodzaj != "pociag":
+            return False
+        for idx, rect in self._rozklad_wiersze_rects:
+            if rect.collidepoint(pos):
+                self.wybrany_rozklad_wiersz = idx
+                obiekt = self._aktualny_obiekt(graf)
+                if isinstance(obiekt, dict):
+                    self._wypelnij_formularz_dla_aktualnego(graf, reset_scroll=False)
+                return True
+        return False
+
+    def _przewin_rozklad(self, graf: MenedzerGrafu, delta: int) -> bool:
+        obiekt = self._aktualny_obiekt(graf)
+        if not isinstance(obiekt, dict):
+            return False
+
+        rozklad = self._normalizuj_rozklad_pociagu(obiekt)
+        max_scroll = max(0, len(rozklad) - ROZKLAD_WIDOCZNE_WIERSZE)
+        poprzedni = self._rozklad_scroll
+        self._rozklad_scroll = max(0, min(max_scroll, self._rozklad_scroll + delta))
+        return self._rozklad_scroll != poprzedni
+
+    def _dodaj_wiersz_rozkladu(self, graf: MenedzerGrafu) -> Optional[str]:
+        obiekt = self._aktualny_obiekt(graf)
+        if not isinstance(obiekt, dict):
+            return "Brak wybranego pociagu."
+        rozklad = self._normalizuj_rozklad_pociagu(obiekt)
+        nazwy_stacji = self._nazwy_stacji(graf)
+        domyslna_nazwa = nazwy_stacji[0] if nazwy_stacji else ""
+        rozklad.append(
+            {
+                "nazwa_stacji": domyslna_nazwa,
+                "id_stacji": domyslna_nazwa,
+                "czas_postoju": 30.0,
+                "przyjazd": None,
+                "odjazd": None,
+            }
+        )
+        self.wybrany_rozklad_wiersz = len(rozklad) - 1
+        self._rozklad_scroll = max(0, len(rozklad) - ROZKLAD_WIDOCZNE_WIERSZE)
+        self._wypelnij_formularz_dla_aktualnego(graf, reset_scroll=False)
+        self._oznacz_zmiane()
+        return None
+
+    def _usun_wiersz_rozkladu(self, graf: MenedzerGrafu) -> Optional[str]:
+        obiekt = self._aktualny_obiekt(graf)
+        if not isinstance(obiekt, dict):
+            return "Brak wybranego pociagu."
+        rozklad = self._normalizuj_rozklad_pociagu(obiekt)
+        if not rozklad:
+            return "Rozklad jest pusty."
+        idx = max(0, min(self.wybrany_rozklad_wiersz, len(rozklad) - 1))
+        rozklad.pop(idx)
+        if not rozklad:
+            self.wybrany_rozklad_wiersz = 0
+            self._rozklad_scroll = 0
+        else:
+            self.wybrany_rozklad_wiersz = min(idx, len(rozklad) - 1)
+            self._rozklad_scroll = min(self._rozklad_scroll, max(0, len(rozklad) - ROZKLAD_WIDOCZNE_WIERSZE))
+        self._wypelnij_formularz_dla_aktualnego(graf, reset_scroll=False)
+        self._oznacz_zmiane()
+        return None
 
     def _przewin_liste(self, graf: MenedzerGrafu, delta: int) -> bool:
         elementy = self._lista_elementow(graf)
@@ -693,17 +814,16 @@ class EdytorMapy:
         if max(abs(dx), abs(dy)) != 1 or (dx == 0 and dy == 0):
             return "Polaczenie mozliwe tylko miedzy sasiednimi polami"
 
-        czy_diagonalne = abs(dx) == 1 and abs(dy) == 1
-        if czy_diagonalne and not (isinstance(wezel_a, WezelZwrotnicy) or isinstance(wezel_b, WezelZwrotnicy)):
-            return "Polaczenia po skosie sa dostepne tylko dla zwrotnic"
-
         kierunek_a = self._mapuj_kierunek(dx, dy)
         kierunek_b = self._mapuj_kierunek(-dx, -dy)
         if not kierunek_a or not kierunek_b:
             return "Nie udalo sie okreslic kierunku polaczenia"
 
+        galaz_a = self.branch_mode
+        galaz_b = self.branch_mode_docelowy
+
         if isinstance(wezel_a, WezelZwrotnicy):
-            if self.branch_mode == "PLUS":
+            if galaz_a == "PLUS":
                 wezel_a.polaczenia_plus[kierunek_a] = (wezel_b.id_wezel, kierunek_a)
             else:
                 wezel_a.polaczenia_minus[kierunek_a] = (wezel_b.id_wezel, kierunek_a)
@@ -712,7 +832,7 @@ class EdytorMapy:
             wezel_a.dodaj_polaczenie(kierunek_a, wezel_b.id_wezel, kierunek_a)
 
         if isinstance(wezel_b, WezelZwrotnicy):
-            if self.branch_mode == "PLUS":
+            if galaz_b == "PLUS":
                 wezel_b.polaczenia_plus[kierunek_b] = (wezel_a.id_wezel, kierunek_b)
             else:
                 wezel_b.polaczenia_minus[kierunek_b] = (wezel_a.id_wezel, kierunek_b)
@@ -886,6 +1006,19 @@ class EdytorMapy:
                     self._wypelnij_formularz_dla_aktualnego(graf)
                     return True
 
+                if self.wybrany_rodzaj == "pociag":
+                    if "rozklad_add" in self._przycisk_rects and self._przycisk_rects["rozklad_add"].collidepoint(zdarzenie.pos):
+                        blad = self._dodaj_wiersz_rozkladu(graf)
+                        self.ustaw_komunikat(blad or "Dodano przystanek do rozkladu")
+                        return True
+                    if "rozklad_del" in self._przycisk_rects and self._przycisk_rects["rozklad_del"].collidepoint(zdarzenie.pos):
+                        blad = self._usun_wiersz_rozkladu(graf)
+                        self.ustaw_komunikat(blad or "Usunieto przystanek z rozkladu")
+                        return True
+                    if self._wybierz_wiersz_rozkladu_po_kliknieciu(zdarzenie.pos, graf):
+                        self.ustaw_komunikat(f"Wybrano wiersz rozkladu #{self.wybrany_rozklad_wiersz + 1}")
+                        return True
+
                 if self._klik_pole(zdarzenie.pos) is not None:
                     idx = self._klik_pole(zdarzenie.pos)
                     if idx is not None:
@@ -904,6 +1037,14 @@ class EdytorMapy:
             if zdarzenie.button in {4, 5}:
                 if self._lista_widok_rect and self._lista_widok_rect.collidepoint(zdarzenie.pos):
                     self._przewin_liste(graf, -1 if zdarzenie.button == 4 else 1)
+                    return True
+                if self._wlasciwosci_widok_rect and self._wlasciwosci_widok_rect.collidepoint(zdarzenie.pos):
+                    if self._przewin_wlasciwosci(-WLASCIWOSCI_SCROLL_KROK if zdarzenie.button == 4 else WLASCIWOSCI_SCROLL_KROK):
+                        return True
+                    return True
+                if self._rozklad_widok_rect and self._rozklad_widok_rect.collidepoint(zdarzenie.pos):
+                    if self._przewin_rozklad(graf, -1 if zdarzenie.button == 4 else 1):
+                        return True
                     return True
 
             if zdarzenie.button == 3:
@@ -929,8 +1070,69 @@ class EdytorMapy:
                 if self._przewin_liste(graf, -zdarzenie.y):
                     return True
                 return True
+            if self._wlasciwosci_widok_rect and self._wlasciwosci_widok_rect.collidepoint(pozycja_myszy):
+                if self._przewin_wlasciwosci(-zdarzenie.y * WLASCIWOSCI_SCROLL_KROK):
+                    return True
+                return True
+            if self._rozklad_widok_rect and self._rozklad_widok_rect.collidepoint(pozycja_myszy):
+                if self._przewin_rozklad(graf, -zdarzenie.y):
+                    return True
+                return True
 
         if zdarzenie.type == py.KEYDOWN:
+            czy_edytuje_pole = self.aktywne_pole >= 0 and self.aktywne_pole < len(self.formularz)
+
+            if czy_edytuje_pole:
+                pole = self.formularz[self.aktywne_pole]
+
+                if zdarzenie.key == py.K_ESCAPE:
+                    self.aktywne_pole = -1
+                    self.bufor_tekstu = ""
+                    self.ustaw_komunikat("Anulowano edycje pola")
+                    return True
+
+                if zdarzenie.key == py.K_TAB and self.formularz:
+                    self.aktywne_pole = (self.aktywne_pole + 1) % len(self.formularz)
+                    self.bufor_tekstu = self.formularz[self.aktywne_pole].wartosc
+                    return True
+
+                if zdarzenie.key == py.K_RETURN:
+                    blad = self._ustaw_wartosc_pola(graf, self.formularz[self.aktywne_pole], self.bufor_tekstu)
+                    if blad:
+                        self.ustaw_komunikat(blad)
+                    else:
+                        self.formularz[self.aktywne_pole].wartosc = self.bufor_tekstu
+                        self.ustaw_komunikat("Zapisano pole")
+                    return True
+
+                if zdarzenie.key == py.K_BACKSPACE:
+                    self.bufor_tekstu = self.bufor_tekstu[:-1]
+                    return True
+
+                if pole.typ == "choice":
+                    if zdarzenie.key in {py.K_LEFT, py.K_RIGHT} and pole.opcje:
+                        idx = pole.opcje.index(self.bufor_tekstu) if self.bufor_tekstu in pole.opcje else 0
+                        if zdarzenie.key == py.K_RIGHT:
+                            idx = (idx + 1) % len(pole.opcje)
+                        else:
+                            idx = (idx - 1) % len(pole.opcje)
+                        self.bufor_tekstu = pole.opcje[idx]
+                        return True
+                    return True
+
+                znak = zdarzenie.unicode
+                if znak:
+                    if pole.typ in {"int", "float"}:
+                        if znak.isdigit() or znak in {"-", "."}:
+                            self.bufor_tekstu += znak
+                            return True
+                    elif znak.isprintable():
+                        self.bufor_tekstu += znak
+                        return True
+
+                # Gdy pole jest aktywne, globalne skróty edytora są zablokowane.
+                return True
+
             if zdarzenie.key == py.K_ESCAPE:
                 self._drag_start_node = None
                 self._szybkie_laczenie_start = None
@@ -1013,31 +1215,12 @@ class EdytorMapy:
                 return True
             if zdarzenie.key == py.K_b:
                 self.branch_mode = "MINUS" if self.branch_mode == "PLUS" else "PLUS"
-                self.ustaw_komunikat(f"Gałąź zwrotnicy: {self.branch_mode}")
+                self.ustaw_komunikat(f"Gałąź startowej zwrotnicy: {self.branch_mode}")
                 return True
-
-            if self.aktywne_pole >= 0 and 0 <= self.aktywne_pole < len(self.formularz):
-                pole = self.formularz[self.aktywne_pole]
-                if pole.typ == "choice":
-                    if zdarzenie.key in {py.K_LEFT, py.K_RIGHT}:
-                        idx = pole.opcje.index(self.bufor_tekstu) if self.bufor_tekstu in pole.opcje else 0
-                        if zdarzenie.key == py.K_RIGHT:
-                            idx = (idx + 1) % len(pole.opcje)
-                        else:
-                            idx = (idx - 1) % len(pole.opcje)
-                        self.bufor_tekstu = pole.opcje[idx]
-                        return True
-                else:
-                    znak = zdarzenie.unicode
-                    if znak:
-                        if pole.typ in {"int", "float"}:
-                            if znak.isdigit() or znak in {"-", "."}:
-                                self.bufor_tekstu += znak
-                                return True
-                        else:
-                            if znak.isprintable():
-                                self.bufor_tekstu += znak
-                                return True
+            if zdarzenie.key == py.K_n:
+                self.branch_mode_docelowy = "MINUS" if self.branch_mode_docelowy == "PLUS" else "PLUS"
+                self.ustaw_komunikat(f"Gałąź docelowej zwrotnicy: {self.branch_mode_docelowy}")
+                return True
 
         return False
 
@@ -1204,6 +1387,9 @@ class EdytorMapy:
         self._lista_rects = []
         self._pole_rects = []
         self._przycisk_rects = {}
+        self._rozklad_wiersze_rects = []
+        self._rozklad_widok_rect = None
+        self._wlasciwosci_widok_rect = None
 
         toolbar = [
             ("select", "Wybierz"),
@@ -1228,14 +1414,15 @@ class EdytorMapy:
                 y += 40
 
         y += 48
-        naglowek = czcionka_duza.render(f"Tryb: {self.tryb.upper()}", True, AKCENT)
+        naglowek = czcionka_duza.render(f"Tryb: {dict(toolbar).get(self.tryb, '').upper()}", True, AKCENT)
         ekran.blit(naglowek, (panel_x + 12, y))
         y += 24
         instrukcja = [
             "LPM: tworzenie/wybor",
             "PPM: usun / anuluj laczenie",
             "1-7: szybka zmiana trybu",
-            "B: gałąź zwrotnicy",
+            "B: galaz startowej zwrotnicy",
+            "N: galaz docelowej zwrotnicy",
             "Enter: zapis pola / peronu",
             "Tab: nastepne pole",
             "Ctrl+S: zapis projektu",
@@ -1292,10 +1479,22 @@ class EdytorMapy:
         py.draw.rect(ekran, TLO_SEKCJI, sekcja, border_radius=8)
         ekran.blit(czcionka_duza.render("Wlasciwosci", True, AKCENT_2), (panel_x + 16, y + 6))
 
-        fy = y + 32
+        self._wlasciwosci_widok_rect = py.Rect(sekcja.x + 8, sekcja.y + 30, sekcja.width - 16, sekcja.height - 38)
+        py.draw.rect(ekran, (18, 22, 30), self._wlasciwosci_widok_rect, border_radius=6)
+
+        clip_poprzedni = ekran.get_clip()
+        ekran.set_clip(self._wlasciwosci_widok_rect)
+
+        baza_y = self._wlasciwosci_widok_rect.y + 8
+        fy = baza_y - self._wlasciwosci_scroll
         self._pole_rects = []
+
+        def _widoczny(rect: py.Rect) -> bool:
+            return self._wlasciwosci_widok_rect is not None and rect.colliderect(self._wlasciwosci_widok_rect)
+
         if not self.formularz:
             ekran.blit(czcionka.render("Wybierz element lub dodaj go na planszy.", True, NAPIS_KOLOR), (panel_x + 16, fy))
+            fy += 24
         else:
             for idx, pole in enumerate(self.formularz):
                 etykieta = czcionka.render(f"{pole.etykieta}", True, NAPIS_KOLOR)
@@ -1312,7 +1511,11 @@ class EdytorMapy:
         if self.wybrany_rodzaj == "zwrotnica" and self.wybrany_id and self.wybrany_id in graf.zwrotnice:
             zwrotnica = graf.zwrotnice[self.wybrany_id]
             fy += 8
-            info = czcionka.render(f"Aktywna galaz: {self.branch_mode}", True, AKCENT)
+            info = czcionka.render(
+                f"Galaz laczenia: start {self.branch_mode}, cel {self.branch_mode_docelowy}",
+                True,
+                AKCENT,
+            )
             ekran.blit(info, (panel_x + 16, fy))
             fy += 20
             plus_txt = ", ".join(f"{k.name}->{v[0]}" for k, v in zwrotnica.polaczenia_plus.items()) or "-"
@@ -1320,18 +1523,98 @@ class EdytorMapy:
             ekran.blit(czcionka.render(f"PLUS: {plus_txt}", True, NAPIS_KOLOR), (panel_x + 16, fy))
             fy += 18
             ekran.blit(czcionka.render(f"MINUS: {minus_txt}", True, NAPIS_KOLOR), (panel_x + 16, fy))
+            fy += 18
 
         if self.wybrany_rodzaj == "station" and self.wybrany_id and self.wybrany_id in graf.stacje:
             fy += 20
             stacja = graf.stacje[self.wybrany_id]
             ekran.blit(czcionka.render(f"Wybrane tory: {', '.join(stacja.id_torow) or '-'}", True, NAPIS_KOLOR), (panel_x + 16, fy))
+            fy += 20
 
         if self.wybrany_rodzaj == "pociag" and self.wybrany_pociag_id is not None and 0 <= self.wybrany_pociag_id < len(self.projekt["pociagi"]):
             fy += 20
             train = self.projekt["pociagi"][self.wybrany_pociag_id]
             ekran.blit(czcionka.render(f"Start: {train.get('pozycja_startowa', {}).get('x', '?')},{train.get('pozycja_startowa', {}).get('y', '?')}", True, NAPIS_KOLOR), (panel_x + 16, fy))
             fy += 18
-            ekran.blit(czcionka.render("Rozklad: STACJA|POSTOJ|PRZYJAZD|ODJAZD; oddzielaj srednikami", True, NAPIS_KOLOR), (panel_x + 16, fy))
+
+            rozklad = self._normalizuj_rozklad_pociagu(train)
+            tabela_x = panel_x + 16
+            tabela_w = PANEL_SZEROKOSC - 32
+            kolumny = [
+                ("Stacja", 124),
+                ("Postoj[s]", 82),
+                ("Przyjazd", 82),
+                ("Odjazd", 82),
+            ]
+
+            py.draw.rect(ekran, (18, 22, 30), py.Rect(tabela_x, fy, tabela_w, 24), border_radius=4)
+            kx = tabela_x + 6
+            for naglowek, szer in kolumny:
+                ekran.blit(czcionka.render(naglowek, True, AKCENT_2), (kx, fy + 4))
+                kx += szer
+
+            y_wiersza = fy + 26
+            max_wiersze = ROZKLAD_WIDOCZNE_WIERSZE
+            max_scroll = max(0, len(rozklad) - max_wiersze)
+            self._rozklad_scroll = max(0, min(self._rozklad_scroll, max_scroll))
+            widoczne = rozklad[self._rozklad_scroll:self._rozklad_scroll + max_wiersze]
+            self._rozklad_widok_rect = py.Rect(tabela_x, y_wiersza - 1, tabela_w, max_wiersze * 24)
+
+            for lokalny_idx, przystanek in enumerate(widoczne):
+                idx = self._rozklad_scroll + lokalny_idx
+                rect = py.Rect(tabela_x, y_wiersza, tabela_w, 22)
+                aktywny = idx == self.wybrany_rozklad_wiersz
+                py.draw.rect(ekran, TLO_POLE_AKTYWNE if aktywny else TLO_POLE, rect, border_radius=4)
+                if _widoczny(rect):
+                    self._rozklad_wiersze_rects.append((idx, rect))
+
+                dane = self._normalizuj_wiersz_rozkladu(przystanek)
+                wartosci = [
+                    str(dane.get("nazwa_stacji") or "-"),
+                    str(dane.get("czas_postoju", 30.0)),
+                    str(dane.get("przyjazd") or "-"),
+                    str(dane.get("odjazd") or "-"),
+                ]
+                kx = tabela_x + 6
+                for (wartosc, (_, szer)) in zip(wartosci, kolumny):
+                    ekran.blit(czcionka.render(wartosc, True, NAPIS_KOLOR), (kx, y_wiersza + 4))
+                    kx += szer
+
+                y_wiersza += 24
+
+            if len(rozklad) > max_wiersze:
+                start = self._rozklad_scroll + 1
+                stop = self._rozklad_scroll + len(widoczne)
+                ekran.blit(czcionka.render(f"Wiersze {start}-{stop} / {len(rozklad)}", True, NAPIS_KOLOR), (tabela_x, y_wiersza + 2))
+                y_wiersza += 16
+            elif not rozklad:
+                ekran.blit(czcionka.render("Rozklad pusty - dodaj pierwszy przystanek", True, NAPIS_KOLOR), (tabela_x, y_wiersza + 2))
+                y_wiersza += 16
+
+            btn_add = py.Rect(tabela_x, y_wiersza + 4, 150, 22)
+            btn_del = py.Rect(tabela_x + 160, y_wiersza + 4, 150, 22)
+            if _widoczny(btn_add):
+                self._przycisk_rects["rozklad_add"] = btn_add
+            if _widoczny(btn_del):
+                self._przycisk_rects["rozklad_del"] = btn_del
+            self._rysuj_przycisk(ekran, btn_add, "+ Dodaj wiersz", False, czcionka)
+            self._rysuj_przycisk(ekran, btn_del, "- Usun wiersz", False, czcionka)
+            fy = y_wiersza + 30
+
+        ekran.set_clip(clip_poprzedni)
+
+        self._wlasciwosci_wysokosc_tresci = max(0, int(fy - baza_y) + self._wlasciwosci_scroll + 12)
+        if self._wlasciwosci_widok_rect is not None:
+            max_scroll = max(0, self._wlasciwosci_wysokosc_tresci - self._wlasciwosci_widok_rect.height)
+            self._wlasciwosci_scroll = max(0, min(self._wlasciwosci_scroll, max_scroll))
+
+            if max_scroll > 0:
+                pasek_tla = py.Rect(self._wlasciwosci_widok_rect.right - 6, self._wlasciwosci_widok_rect.y + 3, 4, self._wlasciwosci_widok_rect.height - 6)
+                py.draw.rect(ekran, (46, 50, 62), pasek_tla, border_radius=2)
+                uchwyt_h = max(18, int(pasek_tla.height * (self._wlasciwosci_widok_rect.height / max(self._wlasciwosci_wysokosc_tresci, 1))))
+                zakres = max(1, pasek_tla.height - uchwyt_h)
+                uchwyt_y = pasek_tla.y + int((self._wlasciwosci_scroll / max_scroll) * zakres)
+                py.draw.rect(ekran, (130, 138, 165), py.Rect(pasek_tla.x, uchwyt_y, pasek_tla.width, uchwyt_h), border_radius=2)
 
         if self.komunikat.tresc:
             pasek = py.Rect(panel_x + 8, wys - 44, PANEL_SZEROKOSC - 16, 36)

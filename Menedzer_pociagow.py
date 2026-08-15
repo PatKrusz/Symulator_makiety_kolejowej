@@ -1,3 +1,4 @@
+import datetime
 import math
 from typing import Dict, List, Optional
 from Pociag import Pociag
@@ -17,6 +18,23 @@ class MenedzerPociagow:
         self._zolty_tryb: Dict[str, Dict[str, str]] = {}
         self.awaryjne_hamowanie_globalne: bool = False
         self._blokada_po_czerwonym: Dict[str, Dict[str, object]] = {}
+
+    @staticmethod
+    def _normalizuj_klucz_stacji(wartosc: Optional[str]) -> str:
+        return str(wartosc or "").strip().upper()
+
+    def _tory_stacji_docelowej(self, klucz_stacji: Optional[str]) -> set[str]:
+        if not klucz_stacji:
+            return set()
+
+        klucz = self._normalizuj_klucz_stacji(klucz_stacji)
+        tory: set[str] = set()
+        for stacja in self.graf.stacje.values():
+            nazwa = self._normalizuj_klucz_stacji(getattr(stacja, "nazwa_stacji", ""))
+            ident = self._normalizuj_klucz_stacji(getattr(stacja, "id_stacji", ""))
+            if klucz in {nazwa, ident}:
+                tory.update(stacja.id_torow)
+        return tory
 
     def _predkosc_bazowa_pociagu(self, pociag: Pociag) -> float:
         if pociag.narzucona_predkosc_max_pxs is None:
@@ -62,8 +80,8 @@ class MenedzerPociagow:
             "semafor_id": str(status.get("semafor_id", "-")),
         }
 
-    def _czy_koniec_stacji_docelowej(self, pociag: Pociag, stacja_docelowa, id_kafelka_przod: Optional[str]) -> bool:
-        if not stacja_docelowa or not id_kafelka_przod or id_kafelka_przod not in stacja_docelowa.id_torow:
+    def _czy_koniec_stacji_docelowej(self, pociag: Pociag, tory_stacji_docelowej: set[str], id_kafelka_przod: Optional[str]) -> bool:
+        if not tory_stacji_docelowej or not id_kafelka_przod or id_kafelka_przod not in tory_stacji_docelowej:
             return False
 
         obecny_wezel = self.graf.wezly.get(id_kafelka_przod)
@@ -75,24 +93,24 @@ class MenedzerPociagow:
             return True
 
         id_nastepnego, _ = nastepny
-        return id_nastepnego not in stacja_docelowa.id_torow
+        return id_nastepnego not in tory_stacji_docelowej
 
     def _limit_predkosci_dla_dojazdu_do_konca_stacji(
         self,
         pociag: Pociag,
-        stacja_docelowa,
+        tory_stacji_docelowej: set[str],
         id_start: Optional[str],
         kierunek_start: Kierunek,
     ) -> Optional[float]:
-        if not stacja_docelowa or not id_start:
+        if not tory_stacji_docelowej or not id_start:
             return None
 
         obecny_id = id_start
         obecny_kierunek = kierunek_start
         dystans_px = 0.0
 
-        for _ in range(self.zasieg_widoku_kafelki + len(stacja_docelowa.id_torow) + 2):
-            if obecny_id in stacja_docelowa.id_torow:
+        for _ in range(self.zasieg_widoku_kafelki + len(tory_stacji_docelowej) + 2):
+            if obecny_id in tory_stacji_docelowej:
                 nastepny_wezel = self.graf.wezly.get(obecny_id)
                 if not nastepny_wezel:
                     break
@@ -102,7 +120,7 @@ class MenedzerPociagow:
                     break
 
                 id_nastepnego, kierunek_nastepnego = nastepny
-                if id_nastepnego not in stacja_docelowa.id_torow:
+                if id_nastepnego not in tory_stacji_docelowej:
                     return math.sqrt(max(0.0, 2.0 * pociag.efektywne_hamowanie_pxs2 * dystans_px))
 
                 dystans_px += pociag.skaler.rozmiar_kafelka_px
@@ -129,7 +147,13 @@ class MenedzerPociagow:
             return 0.0
         return math.sqrt(max(0.0, 2.0 * pociag.efektywne_hamowanie_pxs2 * bezpieczny_dystans_px))
 
-    def _wyznacz_predkosc_docelowa(self, delta_czasu_symulacji: float, pociag: Pociag, sledzenie: Optional[SledzenieRozkladu]) -> float:
+    def _wyznacz_predkosc_docelowa(
+        self,
+        delta_czasu_symulacji: float,
+        pociag: Pociag,
+        sledzenie: Optional[SledzenieRozkladu],
+        obecny_czas_symulacji: Optional[datetime.datetime] = None,
+    ) -> float:
         """
         Jedno miejsce decyzyjne "patrzenia w przód": stacja docelowa + semafory.
         """
@@ -161,16 +185,15 @@ class MenedzerPociagow:
             else:
                 predkosc_docelowa = min(predkosc_docelowa, predkosc_bazowa * 0.5)
 
-        stacja_docelowa = None
+        tory_stacji_docelowej: set[str] = set()
         if sledzenie:
-            id_stacji_docelowej = sledzenie.id_docelowej_stacji()
-            if id_stacji_docelowej:
-                stacja_docelowa = self.graf.stacje.get(id_stacji_docelowej)
+            nazwa_stacji_docelowej = sledzenie.nazwa_docelowej_stacji()
+            tory_stacji_docelowej = self._tory_stacji_docelowej(nazwa_stacji_docelowej)
 
-        czy_na_stacji_docelowej = bool(stacja_docelowa and id_kafelka_przod in stacja_docelowa.id_torow)
+        czy_na_stacji_docelowej = bool(tory_stacji_docelowej and id_kafelka_przod in tory_stacji_docelowej)
         czy_na_koncu_stacji_docelowej = self._czy_koniec_stacji_docelowej(
             pociag,
-            stacja_docelowa,
+            tory_stacji_docelowej,
             id_kafelka_przod,
         )
         predkosc_dokladnego_dociagniecia = math.sqrt(
@@ -178,7 +201,7 @@ class MenedzerPociagow:
         )
         limit_dojazdu_do_stacji = self._limit_predkosci_dla_dojazdu_do_konca_stacji(
             pociag,
-            stacja_docelowa,
+            tory_stacji_docelowej,
             id_kafelka_przod,
             pociag.aktualny_kierunek,
         )
@@ -196,6 +219,7 @@ class MenedzerPociagow:
                 pociag,
                 czy_na_stacji_docelowej,
                 czy_na_koncu_stacji_docelowej,
+                obecny_czas_symulacji=obecny_czas_symulacji,
             )
             if nadpisanie is not None:
                 predkosc_docelowa = min(predkosc_docelowa, nadpisanie)
@@ -206,7 +230,7 @@ class MenedzerPociagow:
             obecny_kierunek = pociag.aktualny_kierunek
 
             for krok in range(self.zasieg_widoku_kafelki):
-                if stacja_docelowa and krok > 0 and obecny_id in stacja_docelowa.id_torow:
+                if tory_stacji_docelowej and krok > 0 and obecny_id in tory_stacji_docelowej:
                     # Ograniczenie zależne od rzeczywistej odległości do końca stacji,
                     # zamiast stałego wczesnego spowalniania przy pierwszym wykryciu peronu.
                     if limit_dojazdu_do_stacji is not None:
@@ -280,7 +304,7 @@ class MenedzerPociagow:
         if config.DEBUG_MODE:
             print(f"[DEBUG] Zarejestrowano pociąg: {pociag.id_pociagu}")
 
-    def aktualizuj(self, delta_czasu_symulacji: float) -> List[dict]:
+    def aktualizuj(self, delta_czasu_symulacji: float, obecny_czas_symulacji: Optional[datetime.datetime] = None) -> List[dict]:
         """
         Główna funkcja aktualizująca dla wszystkich pociągów.
         Zwraca listę wszystkich zdarzeń infrastrukturalnych
@@ -302,13 +326,14 @@ class MenedzerPociagow:
 
             if sledzenie:
                 if sledzenie.rozklad and sledzenie.rozklad.aktualny_przystanek():
-                    id_stacji_przed_aktualizacja = sledzenie.rozklad.aktualny_przystanek().id_stacji
+                    id_stacji_przed_aktualizacja = sledzenie.rozklad.aktualny_przystanek().nazwa_stacji
 
             # 2. WSPÓLNA LOGIKA PATRZENIA W PRZÓD (SEMAFORY + STACJA)
             predkosc_docelowa = self._wyznacz_predkosc_docelowa(
                 delta_czasu_symulacji,
                 pociag,
                 sledzenie,
+                obecny_czas_symulacji=obecny_czas_symulacji,
             )
             nowy_stan = sledzenie.stan_pociagu if sledzenie else StanPociagu.JAZDA
 
@@ -319,6 +344,7 @@ class MenedzerPociagow:
                             "typ": "pociag_zatrzymal_sie_na_stacji",
                             "pociag_id": id_pociagu,
                             "stacja_id": id_stacji_przed_aktualizacja,
+                            "stacja_nazwa": id_stacji_przed_aktualizacja,
                         }
                     )
                 elif poprzedni_stan == StanPociagu.POSTOJ and nowy_stan == StanPociagu.JAZDA and id_stacji_przed_aktualizacja:
@@ -327,20 +353,20 @@ class MenedzerPociagow:
                             "typ": "pociag_odjechal_ze_stacji",
                             "pociag_id": id_pociagu,
                             "stacja_id": id_stacji_przed_aktualizacja,
+                            "stacja_nazwa": id_stacji_przed_aktualizacja,
                         }
                     )
 
             self._poprzedni_stan_rozkladu[id_pociagu] = nowy_stan
 
-            stacja_docelowa_dla_flagi = None
+            tory_stacji_docelowej_dla_flagi: set[str] = set()
             if sledzenie:
-                id_stacji_docelowej = sledzenie.id_docelowej_stacji()
-                if id_stacji_docelowej:
-                    stacja_docelowa_dla_flagi = self.graf.stacje.get(id_stacji_docelowej)
+                nazwa_stacji_docelowej = sledzenie.nazwa_docelowej_stacji()
+                tory_stacji_docelowej_dla_flagi = self._tory_stacji_docelowej(nazwa_stacji_docelowej)
 
             czy_na_koncu_stacji_docelowej = self._czy_koniec_stacji_docelowej(
                 pociag,
-                stacja_docelowa_dla_flagi,
+                tory_stacji_docelowej_dla_flagi,
                 id_kafelka_przod,
             )
 

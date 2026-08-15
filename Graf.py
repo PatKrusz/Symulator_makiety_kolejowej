@@ -31,6 +31,33 @@ class MenedzerGrafu:
         """Dodaje stację do grafu."""
         self.stacje[stacja.id_stacji] = stacja
 
+    def odswiez_spojnosc_runtime(self) -> None:
+        """Odbudowuje indeksy runtime po edycji obiektów bez restartu aplikacji."""
+        # 1) Upewnij się, że słownik zwrotnic odpowiada aktualnym obiektom węzłów.
+        self.zwrotnice = {
+            id_wezla: wezel
+            for id_wezla, wezel in self.wezly.items()
+            if isinstance(wezel, WezelZwrotnicy)
+        }
+
+        # 2) Odrzuć semafory wskazujące na nieistniejące tory.
+        self.semafory = {
+            id_sem: sem
+            for id_sem, sem in self.semafory.items()
+            if sem.id_toru in self.wezly
+        }
+
+        # 3) Odbuduj indeks semaforów po (tor, kierunek).
+        self.semafory_dla_wezlow = {}
+        for semafor in self.semafory.values():
+            self.semafory_dla_wezlow[(semafor.id_toru, semafor.kierunek_sem)] = semafor
+
+        # 4) Odrzuć nieistniejące tory przypięte do stacji.
+        for id_stacji, stacja in list(self.stacje.items()):
+            stacja.id_torow = [id_toru for id_toru in stacja.id_torow if id_toru in self.wezly]
+            if not stacja.id_torow:
+                self.stacje.pop(id_stacji, None)
+
     @staticmethod
     def _wektor_kierunku(kierunek: Kierunek) -> tuple[float, float]:
         mapa = {

@@ -86,7 +86,11 @@ def _odtworz_pociagi_z_projektu(graf: MenedzerGrafu, skaler, menedzer_pociagow: 
             for dane_rozklad in dane.get("rozklad", []):
                 przystanki.append(
                     Przystanek(
-                        id_stacji=dane_rozklad["id_stacji"],
+                        nazwa_stacji=str(
+                            dane_rozklad.get("nazwa_stacji")
+                            or dane_rozklad.get("id_stacji")
+                            or ""
+                        ),
                         czas_przyjazdu=dane_rozklad.get("przyjazd"),
                         czas_odjazdu=dane_rozklad.get("odjazd"),
                         czas_postoju=float(dane_rozklad.get("czas_postoju", 10.0)),
@@ -155,8 +159,6 @@ def _obsluz_klik_symulacji(
     most_usb: MostKomunikacjiUSB,
     modyfikatory: int = 0,
 ) -> None:
-    x_world, y_world = silnik.ekran_na_swiat(float(pos[0]), float(pos[1]))
-
     # 1) Najpierw semafory: klik blisko lampy.
     for semafor in graf.semafory.values():
         pozycja_semafora = _pozycja_semafora_na_ekranie(graf, silnik, semafor)
@@ -164,7 +166,7 @@ def _obsluz_klik_symulacji(
             continue
         x_sem, y_sem = pozycja_semafora
         promien_kliku = max(12, int(round(12 * silnik.zoom)))
-        if (x_world - x_sem) ** 2 + (y_world - y_sem) ** 2 <= promien_kliku ** 2:
+        if (pos[0] - x_sem) ** 2 + (pos[1] - y_sem) ** 2 <= promien_kliku ** 2:
             semafor.ustaw_sygnal(_nastepny_sygnal(semafor.sygnal))
             most_usb.wyslij_zdarzenie(
                 "semafor_zmieniony",
@@ -263,9 +265,8 @@ def main():
     podpis_edytora = _podpis_edytora(edytor)
 
     dziala = True
+    zegar.przelacz_pauze()  # Start w trybie pauzy.
     ostatnia_pozycja_pan = None
-    #graf.zwrotnice["T07"].ustaw_pozycje(Zwrot.MINUS)
-    #graf.zwrotnice["T16"].ustaw_pozycje(Zwrot.MINUS)
     
     while dziala:
         rzeczywista_delta_czasu = zegar_pygame.tick(60) / 1000.0
@@ -275,6 +276,14 @@ def main():
             if zdarzenie.type == py.QUIT:
                 dziala = False
             elif zdarzenie.type == py.KEYDOWN:
+                if edytor.aktywny and edytor.obsluz_zdarzenie(
+                    zdarzenie,
+                    graf,
+                    skaler,
+                    ekran_na_swiat=silnik.ekran_na_swiat,
+                ):
+                    continue
+
                 if zdarzenie.key == py.K_e or zdarzenie.key == py.K_F2:
                     aktywny = edytor.przelacz()
                     if aktywny:
@@ -285,19 +294,11 @@ def main():
                     elif zegar.pauza != pauza_przed_edytorem:
                         zegar.przelacz_pauze()
                     continue
-                elif zdarzenie.key == py.K_KP0 or zdarzenie.key == py.K_0:
+                elif (not edytor.aktywny) and (zdarzenie.key == py.K_KP0 or zdarzenie.key == py.K_0):
                     silnik.resetuj_widok()
                     continue
                 elif zdarzenie.key == py.K_ESCAPE:
                     dziala = False
-                    continue
-
-                if edytor.aktywny and edytor.obsluz_zdarzenie(
-                    zdarzenie,
-                    graf,
-                    skaler,
-                    ekran_na_swiat=silnik.ekran_na_swiat,
-                ):
                     continue
 
                 if not edytor.aktywny and zdarzenie.key == py.K_SPACE:
@@ -367,6 +368,7 @@ def main():
         nowy_podpis = _podpis_edytora(edytor)
         if nowy_podpis != podpis_edytora:
             if nowy_podpis[0] != podpis_edytora[0]:
+                graf.odswiez_spojnosc_runtime()
                 most_usb.odswiez_model_sekcji()
 
             if nowy_podpis[1] != podpis_edytora[1]:
@@ -376,7 +378,10 @@ def main():
 
         symulowana_delta_czasu = 0.0 if edytor.aktywny else zegar.aktualizuj_czas(rzeczywista_delta_czasu)
         if not zegar.pauza and not edytor.aktywny:
-            zdarzenia = menedzer_pociagow.aktualizuj(symulowana_delta_czasu)
+            zdarzenia = menedzer_pociagow.aktualizuj(
+                symulowana_delta_czasu,
+                obecny_czas_symulacji=zegar.czas_symulacji,
+            )
             most_usb.wyslij_zdarzenia_symulacji(zdarzenia, zegar.obecna_data())
 
         silnik.renderuj_klatke(graf, menedzer_pociagow, zegar.obecny_czas(), edytor=edytor)

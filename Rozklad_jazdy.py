@@ -1,5 +1,6 @@
 # Rozkład jazdy dla pociągów
 
+import datetime
 from dataclasses import dataclass
 from enum import Enum
 from typing import List, Optional
@@ -16,10 +17,15 @@ class StanPociagu(Enum):
 @dataclass
 class Przystanek:
     """Pojedyńczy przystanek w rozkładzie jazdy"""
-    id_stacji: str
+    nazwa_stacji: str
     czas_postoju: float = 30 # Czas postoju w sekundach symulacji
     czas_przyjazdu: Optional[str] = None
     czas_odjazdu: Optional[str] = None
+
+    @property
+    def id_stacji(self) -> str:
+        # Zgodność wsteczna: starszy kod mógł czytać id_stacji.
+        return self.nazwa_stacji
 
 class RozkladPociagu:
     """Zarządza sekwencją przystanków dla danego pociągu"""
@@ -51,13 +57,47 @@ class SledzenieRozkladu:
         self.stan_pociagu: StanPociagu = StanPociagu.JAZDA
         self.zegar_postoju: float = 0.0 # Obecny czas postoju na stacji
 
-    def id_docelowej_stacji(self) -> Optional[str]:
-        """Zwraca ID bieżącej stacji docelowej z rozkładu lub None."""
+    @staticmethod
+    def _czas_hhmmss(czas_txt: str) -> Optional[datetime.time]:
+        txt = str(czas_txt or "").strip()
+        if not txt:
+            return None
+
+        for fmt in ("%H:%M:%S", "%H:%M"):
+            try:
+                return datetime.datetime.strptime(txt, fmt).time()
+            except ValueError:
+                continue
+        return None
+
+    def _czy_minal_czas_odjazdu(
+        self,
+        obecny_czas_symulacji: Optional[datetime.datetime],
+        planowany_odjazd: Optional[str],
+    ) -> bool:
+        if not planowany_odjazd:
+            return True
+        if obecny_czas_symulacji is None:
+            # Brak zegara symulacji: zachowaj stare zachowanie (tylko czas postoju).
+            return True
+
+        czas_docelowy = self._czas_hhmmss(planowany_odjazd)
+        if czas_docelowy is None:
+            return True
+
+        return obecny_czas_symulacji.time() >= czas_docelowy
+
+    def nazwa_docelowej_stacji(self) -> Optional[str]:
+        """Zwraca nazwę bieżącej stacji docelowej z rozkładu lub None."""
         if not self.rozklad or self.rozklad.czy_koniec():
             return None
 
         przystanek = self.rozklad.aktualny_przystanek()
-        return przystanek.id_stacji if przystanek else None
+        return przystanek.nazwa_stacji if przystanek else None
+
+    def id_docelowej_stacji(self) -> Optional[str]:
+        # Zgodność wsteczna: stare API zwracało "id", teraz zwracamy nazwę stacji.
+        return self.nazwa_docelowej_stacji()
 
     def aktualizuj_stan_postoju(
         self,
@@ -65,6 +105,7 @@ class SledzenieRozkladu:
         pociag: Pociag,
         czy_na_stacji_docelowej: bool,
         czy_na_koncu_stacji_docelowej: bool = False,
+        obecny_czas_symulacji: Optional[datetime.datetime] = None,
     ) -> Optional[float]:
         """
         Aktualizuje stan rozkładu niezależnie od logiki "patrzenia w przód".
@@ -85,9 +126,16 @@ class SledzenieRozkladu:
         # Trwający postój na stacji.
         if self.stan_pociagu == StanPociagu.POSTOJ:
             self.zegar_postoju += delta_czasu_symulacji
-            if self.zegar_postoju >= obecny_przystanek.czas_postoju:
+
+            postoj_zakonczony = self.zegar_postoju >= obecny_przystanek.czas_postoju
+            odjazd_dozwolony_czasowo = self._czy_minal_czas_odjazdu(
+                obecny_czas_symulacji,
+                obecny_przystanek.czas_odjazdu,
+            )
+
+            if postoj_zakonczony and odjazd_dozwolony_czasowo:
                 if config.DEBUG_MODE:
-                    print(f"[DEBUG] Odjazd ze stacji {obecny_przystanek.id_stacji}")
+                    print(f"[DEBUG] Odjazd ze stacji {obecny_przystanek.nazwa_stacji}")
                 self.zegar_postoju = 0.0
                 self.rozklad.nastepny_przystanek()
                 self.stan_pociagu = StanPociagu.JAZDA
@@ -114,8 +162,11 @@ class SledzenieRozkladu:
     def aktualizuj_logike_rozkladu(
         self, delta_czasu_symulacji: float, pociag: Pociag, graf: MenedzerGrafu) -> float:
         """Zachowana kompatybilność starego API. Logika szlakowa jest w MenedzerPociagow."""
-        id_docelowej_stacji = self.id_docelowej_stacji()
-        stacja_docelowa = graf.stacje.get(id_docelowej_stacji) if id_docelowej_stacji else None
+        nazwa_docelowej_stacji = self.nazwa_docelowej_stacji()
+        stacja_docelowa = next(
+            (s for s in graf.stacje.values() if s.nazwa_stacji == nazwa_docelowej_stacji),
+            None,
+        ) if nazwa_docelowej_stacji else None
         id_przodu = pociag.id_zajetych_kafelkow[-1] if pociag.id_zajetych_kafelkow else None
         czy_na_stacji_docelowej = bool(stacja_docelowa and id_przodu in stacja_docelowa.id_torow)
 
@@ -146,7 +197,7 @@ if __name__ == "__main__":
     stacja = ObszarStacji("ST01", "Stacja Główna", ["T02"])
     graf.dodaj_stacje(stacja)
 
-    stop = Przystanek("ST01", 3.0)
+    stop = Przystanek("Stacja Główna", 3.0)
     rozklad = RozkladPociagu("R01", [stop])
     sledzenie = SledzenieRozkladu(rozklad)
 
