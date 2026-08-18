@@ -271,6 +271,8 @@ def main():
     while dziala:
         rzeczywista_delta_czasu = zegar_pygame.tick(60) / 1000.0
         most_usb.obsluz_wejscie()
+        # zaplanuj wydarzenia w zegarze symulacji na podstawie zdarzeń z USB
+        most_usb.zaplanuj_wydarzenia_z_usb(zegar)
 
         for zdarzenie in py.event.get():
             if zdarzenie.type == py.QUIT:
@@ -382,7 +384,7 @@ def main():
                 symulowana_delta_czasu,
                 obecny_czas_symulacji=zegar.czas_symulacji,
             )
-            most_usb.wyslij_zdarzenia_symulacji(zdarzenia, zegar.obecna_data())
+            most_usb.wyslij_zdarzenia_symulacji(zdarzenia, zegar.obecny_czas())
 
         silnik.renderuj_klatke(graf, menedzer_pociagow, zegar.obecny_czas(), edytor=edytor)
 

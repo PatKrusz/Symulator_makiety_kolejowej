@@ -1,6 +1,8 @@
 import importlib
+import heapq
 import json
 from typing import Any, Dict, List, Optional, Tuple
+import datetime
 
 import config
 from Graf import MenedzerGrafu
@@ -80,12 +82,17 @@ class MostKomunikacjiUSB:
         self._sasiedzi_torow: Dict[str, set[str]] = {}
         self._zajetosc_sekcji_pociagow: Dict[str, Dict[str, int]] = {}
         self._aktualna_sekcja_pociagu: Dict[str, str] = {}
+        self.bufor_odczytu = ""
+        self.bufor_komend: List[str] = []
 
         self._zbuduj_model_sekcji()
 
         #self._zbuduj_mape_sekcji_dla_kontrolera()
         if config.DEBUG_MODE:
-            #print(json.dumps(self._zbuduj_mape_sekcji_dla_kontrolera(), ensure_ascii=True, indent=None, separators=(",", ":")))
+            #print(json.dumps(self._zbuduj_mape_sekcji_dla_kontrolera(), ensure_ascii=True, indent=0, separators=(",", ":")))
+            #zapisz do pliku
+            #with open("mapa.json", "w", encoding="utf-8") as f:
+            #    json.dump(self._zbuduj_mape_sekcji_dla_kontrolera(), f, ensure_ascii=True, indent=1, separators=(",", ":"))
             #zrzut = self._zrzut_stanu()
             #tylko lista kluczy
             #print("[DEBUG] Lista pociagow", json.dumps(zrzut.get("pociagi", ""), ensure_ascii=True, indent=None, separators=(",", ":")))
@@ -93,9 +100,9 @@ class MostKomunikacjiUSB:
             #print("[DEBUG] Lista semaforow", json.dumps(zrzut.get("semafory", ""), ensure_ascii=True, indent=None, separators=(",", ":")))
             #print("[DEBUG] Lista zwrotnic", json.dumps(zrzut.get("zwrotnice", ""), ensure_ascii=True, indent=None, separators=(",", ":")))
 
-            self._wykonaj_komende({"cmd": "snapshot"})
+            #self._wykonaj_komende({"cmd": "snapshot"})
             self._wykonaj_komende({"cmd": "get_section", "id": "P01"})
-            self._wykonaj_komende({"cmd": "get_switch", "id": "T22"})
+            #self._wykonaj_komende({"cmd": "get_switch", "id": "T22"})
 
         if self.wlaczony:
             self._otworz_port()
@@ -327,32 +334,33 @@ class MostKomunikacjiUSB:
         id_czola = pociag.id_zajetych_kafelkow[-1]
         return self._sekcja_dla_toru_lub_sasiedztwa(str(id_czola))
 
-    def _nastepna_stacja_pociagu(self, pociag_id: str) -> Tuple[str, str, str]:
+    def _nastepna_stacja_pociagu(self, pociag_id: str) -> Tuple[str, str, str, str]:
         sledzenie = self.menedzer_pociagow.sledzenie_rozkladow.get(pociag_id)
         if not sledzenie or not sledzenie.rozklad:
-            return "-", "-", "-"
+            return "-", "-", "-", "-"
 
         przystanek = sledzenie.rozklad.aktualny_przystanek()
         if not przystanek:
-            return "-", "-", "-"
+            return "-", "-", "-", "-"
 
         return (
             przystanek.nazwa_stacji,
             str(przystanek.czas_przyjazdu or "-"),
             str(przystanek.czas_odjazdu or "-"),
+            str(przystanek.czas_postoju or "-"),
         )
 
-    def _typ_pociagu_kod(self, typ: str) -> str:
+    def _typ_pociagu_kod(self, typ: str) -> int:
         typ_up = typ.strip().upper()
         if typ_up in {"OSOBOWY", "OSO"}:
-            return "OSO"
+            return 1
         if typ_up in {"TOWAROWY", "TOW"}:
-            return "TOW"
+            return 0
         if typ_up in {"POSPIESZNY", "POS"}:
-            return "POS"
+            return 2
         if typ_up in {"TECHNICZNY", "TECH"}:
-            return "TEC"
-        return typ_up
+            return 3
+        return -1
 
     def _aktualizuj_i_raportuj_sekcje(self, zdarzenie: Dict[str, Any], czas_symulacji: str) -> None:
         """
@@ -403,7 +411,7 @@ class MostKomunikacjiUSB:
         """
         Wysyła zdarzenie przez USB.
         """
-        czas = self.zegar.obecna_data()
+        czas = self.zegar.obecny_czas()
 
         if typ == "zwrotnica_rozpruta":
             self._wyslij_tekst(
@@ -626,16 +634,19 @@ class MostKomunikacjiUSB:
 
         try:
             while self._serial.in_waiting > 0:
-                linia = self._serial.readline().decode("utf-8", errors="ignore").strip()
-                if not linia:
-                    continue
+                fragment = self._serial.read(self._serial.in_waiting)
+                if not fragment:
+                    break
+                self.bufor_odczytu += fragment.decode("utf-8", errors="ignore")
 
-                komenda, blad = self._zparsuj_komende(linia)
-                if blad:
-                    self._odpowiedz_error_txt(blad)
-                    continue
-
-                self._wykonaj_komende(komenda)
+                pelne_linie = self.bufor_odczytu.split("\n")
+                self.bufor_odczytu = pelne_linie.pop()
+                self.bufor_komend.extend(
+                    linia.strip()
+                    for linia in pelne_linie
+                    if linia.strip()
+                )
+                
         except SerialException as e:
             print(f"[WARN] Błąd odczytu z USB: {e}")
 
@@ -653,7 +664,7 @@ class MostKomunikacjiUSB:
             return
 
         if cmd == "ping":
-            self._odpowiedz_ok_txt("PNG", self.zegar.obecna_data())
+            self._odpowiedz_ok_txt("PNG", self.zegar.obecny_czas())
             return
 
         if cmd == "set_switch":
@@ -765,7 +776,7 @@ class MostKomunikacjiUSB:
             id_ogona = pociag.id_zajetych_kafelkow[0] if pociag.id_zajetych_kafelkow else "-"
             predkosc_kmh = pociag.skaler.pxs_na_kmh(pociag.predkosc_aktualna_pxs)
             id_sekcji = self._sekcja_dla_pociagu(pociag.id_pociagu)
-            stacja_nast, czas_przyj, czas_odj = self._nastepna_stacja_pociagu(pociag.id_pociagu)
+            stacja_nast, czas_przyj, czas_odj, czas_postoju = self._nastepna_stacja_pociagu(pociag.id_pociagu)
             status_czerwony = self.menedzer_pociagow.status_blokady_po_czerwonym(pociag.id_pociagu)
             self._odpowiedz_data_txt(
                 "POC",
@@ -773,7 +784,7 @@ class MostKomunikacjiUSB:
                 f"{pociag.predkosc_aktualna_pxs:.3f}",
                 f"{pociag.predkosc_docelowa_pxs:.3f}",
                 f"{predkosc_kmh:.2f}",
-                self._typ_pociagu_kod(pociag.typ_pociagu),
+                f"{self._typ_pociagu_kod(pociag.typ_pociagu):.0f}",
                 pociag.aktualny_kierunek.value,
                 str(id_czola),
                 str(id_ogona),
@@ -781,6 +792,7 @@ class MostKomunikacjiUSB:
                 stacja_nast,
                 czas_przyj,
                 czas_odj,
+                czas_postoju,
                 "1" if status_czerwony["aktywna"] else "0",
                 str(status_czerwony["semafor_id"]),
             )
@@ -792,8 +804,8 @@ class MostKomunikacjiUSB:
             if not pociag:
                 odpowiedz_error("nieznany_pociag")
                 return
-            stacja_nast, czas_przyj, czas_odj = self._nastepna_stacja_pociagu(id_pociagu)
-            self._odpowiedz_data_txt("ROZ", id_pociagu, stacja_nast, czas_przyj, czas_odj)
+            stacja_nast, czas_przyj, czas_odj, czas_postoju = self._nastepna_stacja_pociagu(id_pociagu)
+            self._odpowiedz_data_txt("ROZ", id_pociagu, stacja_nast, czas_przyj, czas_odj, czas_postoju)
             return
 
         if cmd == "set_train_direction":
@@ -908,6 +920,7 @@ class MostKomunikacjiUSB:
                 str(len(zrzut["pociagi"])),
                 str(len(zrzut["semafory"])),
                 str(len(zrzut["zwrotnice"])),
+                str(len(zrzut["sekcje"]))
             )
             self._wyslij_tekst(
                 "EVT:MAPA_SEKCJI:" + json.dumps(self._zbuduj_mape_sekcji_dla_kontrolera(), ensure_ascii=True, indent=None, separators=(",", ":"))
@@ -992,7 +1005,7 @@ class MostKomunikacjiUSB:
         }
 
         return {
-            "czas_symulacji": self.zegar.obecna_data(),
+            "czas_symulacji": self.zegar.obecny_czas(),
             "pociagi": pociagi,
             "semafory": semafory,
             "zwrotnice": zwrotnice,
@@ -1065,64 +1078,119 @@ class MostKomunikacjiUSB:
 
         return [nastawy[id_zwrotnicy] for id_zwrotnicy in sorted(nastawy)]
 
+    def _ocen_sciezke_do_sekcji(
+        self,
+        sciezka_torow: List[str],
+    ) -> Optional[Tuple[List[Dict[str, Optional[str]]], Tuple[int, int, int]]]:
+        """Sprawdza przejazd po ścieżce i zwraca nastawy oraz koszt trasy."""
+        nastawy: Dict[str, Dict[str, Optional[str]]] = {}
+
+        for idx in range(1, len(sciezka_torow) - 1):
+            id_zwrotnicy = sciezka_torow[idx]
+            if id_zwrotnicy not in self.graf.zwrotnice:
+                continue
+
+            pozycja = self._wyznacz_wymagana_pozycje_zwrotnicy(
+                sciezka_torow[idx - 1],
+                id_zwrotnicy,
+                sciezka_torow[idx + 1],
+            )
+            if pozycja is None:
+                return None
+
+            nastawy[id_zwrotnicy] = {"id": id_zwrotnicy, "pozycja": pozycja}
+
+        lista_nastaw = [nastawy[id_zwrotnicy] for id_zwrotnicy in sorted(nastawy)]
+        liczba_minus = sum(nastawa.get("pozycja") == Zwrot.MINUS.value for nastawa in lista_nastaw)
+        koszt = (liczba_minus, len(lista_nastaw), len(sciezka_torow))
+        return lista_nastaw, koszt
+
     def _znajdz_polaczone_sekcje(self, id_sekcji: str) -> List[Dict[str, Any]]:
         """
         Zwraca listę połączeń z innymi sekcjami wraz z informacją, który semafor i
-        jakie zwrotnice są potrzebne, aby wejść do sekcji docelowej.
+        jakie zwrotnice są potrzebne, aby wejść do sekcji docelowej. 
+        Sprawdza czy zwrotnica umożliwia przejazd z poprzedniego toru do następnego toru w sekcji docelowej, aby uniknąć niemożliwych przejazdów (np z jednego kierunku zwrotnego na inny kierunek zwrotny).
+        Przyjmuje tylko jedną ścieżkę do sekcji docelowej. Jeśli istnieje wiele
+        ścieżek, wybiera tę z najmniejszą liczbą nastaw MINUS.
         """
         if id_sekcji not in self._sekcje:
             return []
 
         tory_sekcji = set(self._sekcje[id_sekcji]["tory"])
         polaczone_sekcje: Dict[str, Dict[str, Any]] = {}
-        odwiedzone: set[str] = set()
-        kolejka: List[Tuple[str, List[str], Optional[str]]] = [
-            (id_toru, [id_toru], None) for id_toru in tory_sekcji
-        ]
+        kolejka: List[Tuple[Tuple[int, int, int], Tuple[str, ...], Optional[str]]] = []
 
         semafory_na_torze: Dict[str, List[str]] = {}
         for id_semafora, semafor in self.graf.semafory.items():
             semafory_na_torze.setdefault(semafor.id_toru, []).append(id_semafora)
 
-        while kolejka:
-            id_toru, sciezka_torow, semafor_sciezki = kolejka.pop()
-            if id_toru in odwiedzone:
-                continue
-            odwiedzone.add(id_toru)
+        for id_toru in sorted(tory_sekcji):
+            heapq.heappush(kolejka, ((0, 0, 1), (id_toru,), None))
 
-            for sasiad in self._sasiedzi_torow.get(id_toru, set()):
-                if sasiad in odwiedzone:
+        while kolejka:
+            koszt, sciezka_torow, semafor_sciezki = heapq.heappop(kolejka)
+            id_toru = sciezka_torow[-1]
+
+            for sasiad in sorted(self._sasiedzi_torow.get(id_toru, set())):
+                if sasiad in sciezka_torow or sasiad in tory_sekcji:
                     continue
 
-                sciezka_do_sasiada = list(sciezka_torow)
-                sciezka_do_sasiada.append(sasiad)
+                sciezka_do_sasiada = sciezka_torow + (sasiad,)
 
                 semafor_do_sasiada = semafor_sciezki
                 if semafor_do_sasiada is None:
                     kandydaci = semafory_na_torze.get(id_toru, []) + semafory_na_torze.get(sasiad, [])
-                    semafor_do_sasiada = kandydaci[0] if kandydaci else None
+                    semafor_do_sasiada = sorted(kandydaci)[0] if kandydaci else None
 
                 sekcja_sasiada = self._sekcja_dla_toru.get(sasiad)
                 if sekcja_sasiada and sekcja_sasiada != id_sekcji:
-                    entry = polaczone_sekcje.setdefault(
-                        sekcja_sasiada,
-                        {
-                            "sekcja_docelowa": sekcja_sasiada,
-                            "semafor_id": None,
-                            "zwrotnice": [],
-                        },
-                    )
-                    if entry.get("semafor_id") is None:
-                        entry["semafor_id"] = semafor_do_sasiada
+                    ocena = self._ocen_sciezke_do_sekcji(list(sciezka_do_sasiada))
+                    if ocena is None:
+                        continue
 
-                    if not entry.get("zwrotnice"):
-                        entry["zwrotnice"] = self._wyznacz_nastawy_zwrotnic_dla_sciezki(sciezka_do_sasiada)
+                    nastawy, koszt_trasy = ocena
+                    poprzedni_wynik = polaczone_sekcje.get(sekcja_sasiada)
+                    if poprzedni_wynik is None or koszt_trasy < poprzedni_wynik["_koszt"]:
+                        polaczone_sekcje[sekcja_sasiada] = {
+                            "sekcja_docelowa": sekcja_sasiada,
+                            "semafor_id": semafor_do_sasiada,
+                            "zwrotnice": nastawy,
+                            "_koszt": koszt_trasy,
+                        }
                     continue
 
-                if sasiad not in tory_sekcji:
-                    kolejka.append((sasiad, sciezka_do_sasiada, semafor_do_sasiada))
+                ocena = self._ocen_sciezke_do_sekcji(list(sciezka_do_sasiada))
+                if ocena is None:
+                    continue
+
+                _, koszt_trasy = ocena
+                heapq.heappush(kolejka, (koszt_trasy, sciezka_do_sasiada, semafor_do_sasiada))
 
         if config.DEBUG_MODE:
             print(f"[DEBUG] Sekcja {id_sekcji} ma połączenia z sekcjami: {sorted(polaczone_sekcje)}")
 
-        return [polaczone_sekcje[sekcja_id] for sekcja_id in sorted(polaczone_sekcje)]
+        return [
+            {klucz: wartosc for klucz, wartosc in dane.items() if klucz != "_koszt"}
+            for sekcja_id, dane in sorted(polaczone_sekcje.items())
+        ]
+
+    def zaplanuj_wydarzenia_z_usb(self, zegar: ZegarSymulacji) -> None:
+        """
+        Planuje wszystkie wydarzenia z bufora komend USB w zegarze symulacji.
+        """
+        while self.bufor_komend:
+            linia = self.bufor_komend.pop(0)
+            if config.DEBUG_MODE:
+                print(f"[DEBUG] USB: {linia}")
+            komenda, kod_bledu = self._zparsuj_komende(linia)
+            if kod_bledu:
+                #self._odpowiedz_error_txt(kod_bledu)
+                continue
+
+            if komenda:
+                zegar.dodaj_wydarzenie(
+                    czas_wywolania=zegar.czas_symulacji + datetime.timedelta(seconds=1),
+                    akcja=self._wykonaj_komende,
+                    parametry=(komenda,),
+                    nazwa=f"USB:{komenda.get('cmd', 'UNKNOWN')}"
+                )

@@ -29,7 +29,7 @@ class SilnikGraficzny:
 
     def __init__(self, szerokosc: int, wysokosc: int, skaler: Skaler):
         py.init()
-        self.ekran = py.display.set_mode((szerokosc, wysokosc))
+        self.ekran = py.display.set_mode((szerokosc, wysokosc), py.RESIZABLE)
         py.display.set_caption("Symulator Makiety Kolejowej")
 
         self.skaler = skaler
@@ -346,6 +346,8 @@ class SilnikGraficzny:
 
         szerokosc = self.ekran.get_width()
         wysokosc = self.ekran.get_height()
+
+        self.powierzchnia_alfa = py.Surface((szerokosc, wysokosc), py.SRCALPHA)
 
         self.rysuj_siatke(szerokosc, wysokosc)
         self.rysuj_infrastrukture(graf)

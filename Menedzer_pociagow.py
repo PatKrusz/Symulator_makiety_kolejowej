@@ -142,7 +142,7 @@ class MenedzerPociagow:
         return None
 
     def _predkosc_bezpieczna_z_buforem(self, pociag: Pociag, dystans_do_semafora_px: float) -> float:
-        bezpieczny_dystans_px = max(0.0, dystans_do_semafora_px - pociag.skaler.rozmiar_kafelka_px)
+        bezpieczny_dystans_px = max(0.0, dystans_do_semafora_px - 0.5*pociag.skaler.rozmiar_kafelka_px)
         if pociag.efektywne_hamowanie_pxs2 <= 0.0 or bezpieczny_dystans_px <= 0.0:
             return 0.0
         return math.sqrt(max(0.0, 2.0 * pociag.efektywne_hamowanie_pxs2 * bezpieczny_dystans_px))

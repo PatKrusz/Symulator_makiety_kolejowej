@@ -1,16 +1,17 @@
 # Zegar symulacji
 
 import datetime
-from typing import Callable
+from typing import Any, Callable, Optional, Tuple
 import config
 
 class Wydarzenie:
     """
     Klasa reprezentuje pojedyncze wydarzenie w symulacji zaplanowane na konkretny czas symulacji
     """
-    def __init__(self, czas_symulacji: datetime.datetime, akcja: Callable, nazwa: str = ""):
+    def __init__(self, czas_symulacji: datetime.datetime, akcja: Callable, parametry: tuple = (), nazwa: str = ""):
         self.czas_symulacji = czas_symulacji
         self.akcja = akcja
+        self.parametry = parametry
         self.nazwa = nazwa
         self.wykonane = False
 
@@ -25,7 +26,7 @@ class ZegarSymulacji:
         
         self.czas_symulacji = czas_startu
         self.wspolczynnik_czasu = wspolczynnik_czasu
-        self._zaplanowane_wydarzenia = []
+        self._zaplanowane_wydarzenia: list[Wydarzenie] = []
         self.pauza = False
 
     def ustaw_wspolczynnik_czasu(self, wspolczynnik: float) -> None:
@@ -57,22 +58,27 @@ class ZegarSymulacji:
         self._wykonaj_wydarzenia()
         return delta_czasu_symulacji
 
-    def dodaj_wydarzenie(self, czas_wywolania: datetime.datetime, akcja: Callable, nazwa: str = "") -> None:
+    def dodaj_wydarzenie(self, czas_wywolania: datetime.datetime, akcja: Callable, parametry: Optional[Tuple[Any, ...]] = None, nazwa: str = "") -> None:
         """Dodaje wydarzenie do harmonogramu symulacji. Na konkretną wirtualną godzinę symulacji."""
-        wydarzenie = Wydarzenie(czas_wywolania, akcja, nazwa)
+        wydarzenie = Wydarzenie(czas_wywolania, akcja, parametry or (), nazwa)
         self._zaplanowane_wydarzenia.append(wydarzenie)
+        self._zaplanowane_wydarzenia.sort(key=lambda event: event.czas_symulacji)
 
     def _wykonaj_wydarzenia(self) -> None:
         """Wykonuje wszystkie wydarzenia, których czas symulacji został osiągnięty lub przekroczony."""
-        for wydarzenie in self._zaplanowane_wydarzenia:
-            if not wydarzenie.wykonane and self.czas_symulacji >= wydarzenie.czas_symulacji:
-                if config.DEBUG_MODE:
-                    print(f"[DEBUG] Wykonywanie wydarzenia: {wydarzenie.nazwa} o czasie symulacji: {wydarzenie.czas_symulacji.time()}")
-                try:
-                    wydarzenie.akcja()
-                    wydarzenie.wykonane = True
-                except Exception as e:
-                    print(f"[ERROR] Błąd podczas wykonywania wydarzenia '{wydarzenie.nazwa}': {e}")
+        while self._zaplanowane_wydarzenia:
+            wydarzenie = self._zaplanowane_wydarzenia[0]
+            if wydarzenie.wykonane or wydarzenie.czas_symulacji > self.czas_symulacji:
+                break
+
+            if config.DEBUG_MODE:
+                print(f"[DEBUG] Wykonywanie wydarzenia: {wydarzenie.nazwa} o czasie symulacji: {wydarzenie.czas_symulacji.time()}")
+            try:
+                wydarzenie.akcja(*wydarzenie.parametry)
+                wydarzenie.wykonane = True
+            except Exception as e:
+                print(f"[ERROR] Błąd podczas wykonywania wydarzenia '{wydarzenie.nazwa}': {e}")
+                break
         
         self._zaplanowane_wydarzenia = [w for w in self._zaplanowane_wydarzenia if not w.wykonane]
 
