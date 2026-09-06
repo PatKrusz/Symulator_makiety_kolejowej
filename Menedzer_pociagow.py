@@ -230,6 +230,19 @@ class MenedzerPociagow:
             obecny_kierunek = pociag.aktualny_kierunek
 
             for krok in range(self.zasieg_widoku_kafelki):
+                if krok > 0:
+                    wezel_na_trasie = self.graf.wezly.get(obecny_id)
+                    if wezel_na_trasie and wezel_na_trasie.zajety and wezel_na_trasie.pociag_id != pociag.id_pociagu:
+                        dystans_do_zajetego_px = (
+                            max(0.0, pociag.skaler.rozmiar_kafelka_px - pociag.dystans_w_kafelku_px)
+                            + (krok - 1) * pociag.skaler.rozmiar_kafelka_px
+                        )
+                        predkosc_docelowa = min(
+                            predkosc_docelowa,
+                            self._predkosc_bezpieczna_z_buforem(pociag, dystans_do_zajetego_px),
+                        )
+                        break
+
                 if tory_stacji_docelowej and krok > 0 and obecny_id in tory_stacji_docelowej:
                     # Ograniczenie zależne od rzeczywistej odległości do końca stacji,
                     # zamiast stałego wczesnego spowalniania przy pierwszym wykryciu peronu.

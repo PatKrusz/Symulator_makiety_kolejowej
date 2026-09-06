@@ -50,6 +50,16 @@ class RozkladPociagu:
         """Sprzawdzenie, czy dojechano do końca trasy"""
         return self.id_obecnego_przystanku >= len(self.przystanki)
 
+    def rozklad_do_string(self) -> str:
+        """Zwraca rozkład jazdy w formie prostego tekstu"""
+        przystanki_str = ":".join(
+            f"{p.nazwa_stacji};{int(p.czas_postoju)};"
+            f"{str(p.czas_przyjazdu or '-').replace(':', '-')};"
+            f"{str(p.czas_odjazdu or '-').replace(':', '-')}"
+            for p in self.przystanki
+        )
+        return f"{przystanki_str}"
+
 class SledzenieRozkladu:
     """Klasa odpowiedzialna za realizację rozkładu jazdy na poziomie pociągu."""
     def __init__(self, rozklad: Optional[RozkladPociagu] = None):

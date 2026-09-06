@@ -342,9 +342,16 @@ class EdytorMapy:
 
         if isinstance(obiekt, dict) and "pozycja_startowa" in obiekt:
             self.wybrany_rodzaj = "pociag"
+            typy_pociagow = ["TOWAROWY", "OSOBOWY", "POSPIESZNY", "TECHNICZNY"]
             self.formularz = [
                 PoleFormularza("id", "ID", "text", str(obiekt.get("id", ""))),
-                PoleFormularza("typ", "Typ", "text", str(obiekt.get("typ", ""))),
+                PoleFormularza(
+                    "typ",
+                    "Typ",
+                    "choice",
+                    str(obiekt.get("typ", "OSOBOWY")).strip().upper(),
+                    typy_pociagow,
+                ),
                 PoleFormularza("masa", "Masa", "float", str(obiekt.get("masa", 1.0))),
                 PoleFormularza("max_predkosc_kmh", "V max [km/h]", "float", str(obiekt.get("max_predkosc_kmh", 80.0))),
                 PoleFormularza("przyspieszenie_bazowe", "Przysp. [m/s2]", "float", str(obiekt.get("przyspieszenie_bazowe", 0.8))),

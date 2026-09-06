@@ -209,15 +209,19 @@ class Pociag:
                 nastepny = kafelek_przodu.nastepny_wezel(self.aktualny_kierunek)
                 if nastepny:
                     id_nastepnego_kafelka, kierunek_nastepnego = nastepny
+                    nowy_wezel = graf.wezly[id_nastepnego_kafelka]
+                    if nowy_wezel.zajety and nowy_wezel.pociag_id != self.id_pociagu:
+                        self.dystans_w_kafelku_px = rozmiar_kafelka_px - 0.001
+                        self.predkosc_aktualna_pxs = 0.0
+                        self.predkosc_docelowa_pxs = 0.0
+                        return zdarzenia
 
                     self.id_zajetych_kafelkow.append(id_nastepnego_kafelka)
                     self.aktualny_kierunek = kierunek_nastepnego
 
                     # Oznacz nowy węzeł jako zajęty przez pociąg
-                    nowy_wezel = graf.wezly[id_nastepnego_kafelka]
-                    if nowy_wezel:
-                        nowy_wezel.zajety = True
-                        nowy_wezel.pociag_id = self.id_pociagu
+                    nowy_wezel.zajety = True
+                    nowy_wezel.pociag_id = self.id_pociagu
                     zdarzenia.append(("zajety", id_nastepnego_kafelka))
 
                     # Zwolnij węzeł z tyłu pociągu, jeśli pociąg przesunął się o pełen kafelek

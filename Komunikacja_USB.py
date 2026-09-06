@@ -58,6 +58,7 @@ class MostKomunikacjiUSB:
         "PLUS": "PLU",
         "MINUS": "MIN",
     }
+    _OPOZNIENIE_ZWROTNICY_S = 5.0
 
     def __init__(
         self,
@@ -68,6 +69,8 @@ class MostKomunikacjiUSB:
         port: Optional[str] = None,
         baudrate: int = 115200,
         timeout: float = 0.05,
+        skala_w_metrach: float = 100.0,
+        rozmiar_kafelka_px: int = 48,
     ):
         self.graf = graf
         self.menedzer_pociagow = menedzer_pociagow
@@ -84,6 +87,8 @@ class MostKomunikacjiUSB:
         self._aktualna_sekcja_pociagu: Dict[str, str] = {}
         self.bufor_odczytu = ""
         self.bufor_komend: List[str] = []
+        self.skala_w_metrach = skala_w_metrach
+        self.rozmiar_kafelka_w_px = rozmiar_kafelka_px
 
         self._zbuduj_model_sekcji()
 
@@ -350,6 +355,11 @@ class MostKomunikacjiUSB:
             str(przystanek.czas_postoju or "-"),
         )
 
+    @staticmethod
+    def _czas_dla_ramki(czas: str) -> str:
+        """Zwraca czas bez separatora pola USB ':' ."""
+        return str(czas or "-").replace(":", "-")
+
     def _typ_pociagu_kod(self, typ: str) -> int:
         typ_up = typ.strip().upper()
         if typ_up in {"OSOBOWY", "OSO"}:
@@ -385,7 +395,11 @@ class MostKomunikacjiUSB:
 
             # Raport wjazdu tylko przy przejściu 0->1 (pierwszy wagon w sekcji).
             if licznik_przed == 0:
-                self._wyslij_tekst(f"EVT:SEK_WJA:{id_pociagu}:{id_sekcji}:{czas_symulacji}")
+                pociag = self.menedzer_pociagow.pociagi.get(id_pociagu)
+                kierunek = pociag.aktualny_kierunek.value if pociag else "-"
+                self._wyslij_tekst(
+                    f"EVT:SEK_WJA:{id_pociagu}:{id_sekcji}:{kierunek}:{czas_symulacji}"
+                )
         else:
             if licznik_przed <= 0:
                 return
@@ -430,7 +444,7 @@ class MostKomunikacjiUSB:
         if typ == "zwrotnica_przestawiona":
             self._wyslij_tekst(
                 f"EVT:ZWR:{payload.get('zwrotnica_id', '-')}:"
-                f"{self._MAPA_ZWROT_ENUM_DO_TXT.get(str(payload.get('pozycja', '')).upper(), payload.get('pozycja', '-'))}:{czas}"
+                f"{self._MAPA_ZWROT_ENUM_DO_TXT.get(str(payload.get('pozycja', '')).upper(), payload.get('pozycja', '-'))}:{'1' if payload.get('wymuszenie', True) else '0'}:{czas}"
             )
             return
 
@@ -601,6 +615,15 @@ class MostKomunikacjiUSB:
                 "id": czesci[1],
             }, None
 
+        if cmd == "ALM":
+            if len(czesci) < 4 or czesci[1].upper() != "POC":
+                return None, "bledna_komenda_alm"
+            return {
+                "cmd": "report_train_fault",
+                "id": czesci[2],
+                "reason": czesci[3],
+            }, None
+
         if cmd == "WOL":
             if len(czesci) < 3:
                 return None, "bledna_komenda_wol"
@@ -619,6 +642,13 @@ class MostKomunikacjiUSB:
                     return None, "niepoprawne_max_steps"
 
             return komenda, None
+
+        if cmd == "UST":
+            if len(czesci) < 1:
+                return None, "bledna_komenda_ust"
+            return {
+                "cmd": "get_settings",
+            }, None
 
         if cmd in {"SNP", "SNAP"}:
             return {"cmd": "snapshot"}, None
@@ -684,6 +714,7 @@ class MostKomunikacjiUSB:
                 odpowiedz_error("nieznana_pozycja")
                 return
 
+            zmieniona = zwrotnica.pozycja != nowa_pozycja
             ok = zwrotnica.ustaw_pozycje(nowa_pozycja, wymuszenie=wymuszenie)
             if not ok:
                 odpowiedz_error("zwrotnica_zablokowana")
@@ -694,7 +725,8 @@ class MostKomunikacjiUSB:
                 "pozycja": zwrotnica.pozycja.value,
             }
             self._odpowiedz_ok_txt("ZWR", id_zwrotnicy, self._zwrot_do_kodu(zwrotnica.pozycja))
-            self.wyslij_zdarzenie("zwrotnica_przestawiona", payload)
+            if zmieniona:
+                self.wyslij_zdarzenie("zwrotnica_przestawiona", payload)
             return
 
         if cmd == "get_switch":
@@ -726,13 +758,15 @@ class MostKomunikacjiUSB:
                 odpowiedz_error("nieznany_sygnal")
                 return
 
+            zmieniony = semafor.sygnal != nowy_sygnal
             semafor.ustaw_sygnal(nowy_sygnal)
             payload = {
                 "semafor_id": id_semafora,
                 "sygnal": semafor.sygnal.value,
             }
             self._odpowiedz_ok_txt("SYG", id_semafora, self._sygnal_do_kodu(semafor.sygnal))
-            self.wyslij_zdarzenie("semafor_zmieniony", payload)
+            if zmieniony:
+                self.wyslij_zdarzenie("semafor_zmieniony", payload)
             return
 
         if cmd == "get_signal":
@@ -788,24 +822,33 @@ class MostKomunikacjiUSB:
                 pociag.aktualny_kierunek.value,
                 str(id_czola),
                 str(id_ogona),
+                str(pociag.dlugosc_w_kafelkach),
                 id_sekcji,
                 stacja_nast,
-                czas_przyj,
-                czas_odj,
-                czas_postoju,
+                self._czas_dla_ramki(czas_przyj),
+                self._czas_dla_ramki(czas_odj),
+                str(czas_postoju or "-"),
                 "1" if status_czerwony["aktywna"] else "0",
                 str(status_czerwony["semafor_id"]),
+                f"{pociag.predkosc_max_pxs:.3f}",
             )
             return
 
         if cmd == "get_train_schedule":
-            id_pociagu = komenda.get("id")
+            id_pociagu = str(komenda.get("id"))
             pociag = self.menedzer_pociagow.pociagi.get(id_pociagu)
             if not pociag:
                 odpowiedz_error("nieznany_pociag")
                 return
-            stacja_nast, czas_przyj, czas_odj, czas_postoju = self._nastepna_stacja_pociagu(id_pociagu)
-            self._odpowiedz_data_txt("ROZ", id_pociagu, stacja_nast, czas_przyj, czas_odj, czas_postoju)
+
+            sledzenie = self.menedzer_pociagow.sledzenie_rozkladow.get(id_pociagu)
+            if not sledzenie or not sledzenie.rozklad or not sledzenie.rozklad.przystanki:
+                self._odpowiedz_data_txt("ROZ", id_pociagu, "0")
+                return
+
+            rozklad_str = sledzenie.rozklad.rozklad_do_string()
+            liczba_przystankow = str(len(sledzenie.rozklad.przystanki))
+            self._odpowiedz_data_txt("ROZ", id_pociagu, liczba_przystankow, rozklad_str)
             return
 
         if cmd == "set_train_direction":
@@ -872,6 +915,18 @@ class MostKomunikacjiUSB:
             self._wyslij_tekst(f"EVT:ZGD:{id_pociagu}:{self.zegar.obecna_data()}")
             return
 
+        if cmd == "report_train_fault":
+            id_pociagu = str(komenda.get("id"))
+            pociag = self.menedzer_pociagow.pociagi.get(id_pociagu)
+            if not pociag:
+                odpowiedz_error("nieznany_pociag")
+                return
+            pociag.uszkodzony = True
+            pociag.wymuszony_postoj = True
+            pociag.predkosc_docelowa_pxs = 0.0
+            self._odpowiedz_ok_txt("ALM", "POC", id_pociagu, str(komenda.get("reason", "AWARIA")))
+            return
+
         if cmd == "get_section":
             id_pociagu = str(komenda.get("id"))
             pociag = self.menedzer_pociagow.pociagi.get(id_pociagu)
@@ -925,6 +980,31 @@ class MostKomunikacjiUSB:
             self._wyslij_tekst(
                 "EVT:MAPA_SEKCJI:" + json.dumps(self._zbuduj_mape_sekcji_dla_kontrolera(), ensure_ascii=True, indent=None, separators=(",", ":"))
             )
+            for pociag in self.menedzer_pociagow.pociagi.values():
+                id_czola = pociag.id_zajetych_kafelkow[-1] if pociag.id_zajetych_kafelkow else "-"
+                id_ogona = pociag.id_zajetych_kafelkow[0] if pociag.id_zajetych_kafelkow else "-"
+                predkosc_kmh = pociag.skaler.pxs_na_kmh(pociag.predkosc_aktualna_pxs)
+                id_sekcji = self._sekcja_dla_pociagu(pociag.id_pociagu)
+                stacja_nast, czas_przyj, czas_odj, czas_postoju = self._nastepna_stacja_pociagu(pociag.id_pociagu)
+                status_czerwony = self.menedzer_pociagow.status_blokady_po_czerwonym(pociag.id_pociagu)
+                self._odpowiedz_data_txt(
+                    "POC", pociag.id_pociagu, f"{pociag.predkosc_aktualna_pxs:.3f}",
+                    f"{pociag.predkosc_docelowa_pxs:.3f}", f"{predkosc_kmh:.2f}",
+                    f"{self._typ_pociagu_kod(pociag.typ_pociagu):.0f}", pociag.aktualny_kierunek.value,
+                    str(id_czola), str(id_ogona), str(pociag.dlugosc_w_kafelkach), id_sekcji,
+                    stacja_nast, self._czas_dla_ramki(czas_przyj), self._czas_dla_ramki(czas_odj), str(czas_postoju or "-"),
+                    "1" if status_czerwony["aktywna"] else "0", str(status_czerwony["semafor_id"]),
+                    f"{pociag.predkosc_max_pxs:.3f}",
+                )
+            return
+
+        if cmd == "get_settings":
+            self._odpowiedz_ok_txt(
+                "UST",
+                str(self.zegar.wspolczynnik_czasu),
+                str(self.skala_w_metrach),
+                str(self.rozmiar_kafelka_w_px),
+            )
             return
 
         odpowiedz_error("nieznana_komenda")
@@ -934,30 +1014,42 @@ class MostKomunikacjiUSB:
         Buduje uproszczoną mapę sekcji dla mikrokontrolera.
         Zawiera: długość sekcji, id semaforów granicznych, połączenia do innych sekcji
         wraz z informacją, który semafor i jakie zwrotnice prowadzą do danej sekcji,
-        oraz id oraz nazwę stacji, jeśli sekcja zawiera stację.
+        oraz id, nazwę i długość peronu stacji, jeśli sekcja zawiera stację.
         """
         mapa: Dict[str, Dict[str, Any]] = {}
         for sekcja_id, dane in self._sekcje.items():
             tory = list(dane.get("tory", []))
             graniczne_semafory = list(dane.get("graniczne_semafory", []))
+            wezly_sekcji = [self.graf.wezly[id_toru] for id_toru in tory if id_toru in self.graf.wezly]
+            srodek_x = sum(wezel.x for wezel in wezly_sekcji) / len(wezly_sekcji) if wezly_sekcji else 0.0
+            srodek_y = sum(wezel.y for wezel in wezly_sekcji) / len(wezly_sekcji) if wezly_sekcji else 0.0
             stacja_id = None
+            stacja_obj = None
             for id_stacji, stacja in self.graf.stacje.items():
                 if any(tor_id in tory for tor_id in stacja.id_torow):
                     stacja_id = id_stacji
+                    stacja_obj = stacja
                     break
 
             polaczenia = []
             for polaczenie in self._znajdz_polaczone_sekcje(sekcja_id):
                 polaczenia.append(polaczenie)
 
+            dlugosc_peronu = len(stacja_obj.id_torow) if stacja_obj else 0
+
             mapa[sekcja_id] = {
                 "id": sekcja_id,
-                "dlugosc": max(1, len(tory) + 2), # dodajemy 2, aby uwzględnić kafelki z semaforami granicznymi
+                # W SIPP wierzcholkami sa semafory graniczne, a krawedzia jest
+                # odcinek toru miedzy nimi. Zwrotnice sa doliczane osobno do
+                # konkretnego polaczenia miedzy sekcjami.
+                "dlugosc": max(1, len(tory)),
                 "graniczne_semafory": graniczne_semafory,
                 "polaczenia": polaczenia,
+                "pozycja": {"x": srodek_x, "y": srodek_y},
                 "stacja": {
                     "id": stacja_id,
-                    "nazwa": self.graf.stacje[stacja_id].nazwa_stacji if stacja_id else None,
+                    "nazwa": stacja_obj.nazwa_stacji if stacja_obj else None,
+                    "dlugosc_peronu": dlugosc_peronu,
                 },
             }
 
@@ -1140,10 +1232,27 @@ class MostKomunikacjiUSB:
                 semafor_do_sasiada = semafor_sciezki
                 if semafor_do_sasiada is None:
                     kandydaci = semafory_na_torze.get(id_toru, []) + semafory_na_torze.get(sasiad, [])
-                    semafor_do_sasiada = sorted(kandydaci)[0] if kandydaci else None
+                    # Semafor jest przypisany do krawedzi tylko wtedy, gdy
+                    # jego kierunek faktycznie wyprowadza z sekcji zrodlowej.
+                    # Poprzedni wybor po ID mieszal semafory obu kierunkow.
+                    kandydaci_wyjazdowi = [
+                        id_semafora
+                        for id_semafora in kandydaci
+                        if self._semafor_prowadzi_na_wyjazd_z_komponentu(
+                            id_semafora,
+                            tory_sekcji,
+                        )
+                    ]
+                    semafor_do_sasiada = (
+                        sorted(kandydaci_wyjazdowi)[0]
+                        if kandydaci_wyjazdowi
+                        else None
+                    )
 
                 sekcja_sasiada = self._sekcja_dla_toru.get(sasiad)
                 if sekcja_sasiada and sekcja_sasiada != id_sekcji:
+                    if semafor_do_sasiada is None:
+                        continue
                     ocena = self._ocen_sciezke_do_sekcji(list(sciezka_do_sasiada))
                     if ocena is None:
                         continue
@@ -1151,10 +1260,13 @@ class MostKomunikacjiUSB:
                     nastawy, koszt_trasy = ocena
                     poprzedni_wynik = polaczone_sekcje.get(sekcja_sasiada)
                     if poprzedni_wynik is None or koszt_trasy < poprzedni_wynik["_koszt"]:
+                        semafor = self.graf.semafory[semafor_do_sasiada]
                         polaczone_sekcje[sekcja_sasiada] = {
                             "sekcja_docelowa": sekcja_sasiada,
                             "semafor_id": semafor_do_sasiada,
+                            "kierunek": semafor.kierunek_sem.name,
                             "zwrotnice": nastawy,
+                            "liczba_kafelkow_zwrotnic": len(nastawy),
                             "_koszt": koszt_trasy,
                         }
                     continue
@@ -1188,8 +1300,11 @@ class MostKomunikacjiUSB:
                 continue
 
             if komenda:
+                opoznienie_s = 1.0
+                if komenda.get("cmd") == "set_switch":
+                    opoznienie_s += self._OPOZNIENIE_ZWROTNICY_S
                 zegar.dodaj_wydarzenie(
-                    czas_wywolania=zegar.czas_symulacji + datetime.timedelta(seconds=1),
+                    czas_wywolania=zegar.czas_symulacji + datetime.timedelta(seconds=opoznienie_s),
                     akcja=self._wykonaj_komende,
                     parametry=(komenda,),
                     nazwa=f"USB:{komenda.get('cmd', 'UNKNOWN')}"

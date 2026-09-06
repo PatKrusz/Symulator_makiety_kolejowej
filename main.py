@@ -16,7 +16,6 @@ from Wezly import Kierunek, Sygnal, Zwrot, kierunek_przeciwny
 from Komunikacja_USB import MostKomunikacjiUSB
 from Edytor_mapy import EdytorMapy
 
-
 def _wybierz_plik_konfiguracji(argv: list[str]) -> str:
     domyslny = "sim_config.json"
     edytorowy = "sim_config_edytor.json"
@@ -183,10 +182,10 @@ def _obsluz_klik_symulacji(
     if wezel.id_wezel in graf.zwrotnice:
         zwrotnica = graf.zwrotnice[wezel.id_wezel]
         nowa_pozycja = Zwrot.MINUS if zwrotnica.pozycja == Zwrot.PLUS else Zwrot.PLUS
-        if zwrotnica.ustaw_pozycje(nowa_pozycja):
+        if zwrotnica.ustaw_pozycje(nowa_pozycja, True): # kliknięcie wymusza zmianę pozycji
             most_usb.wyslij_zdarzenie(
                 "zwrotnica_przestawiona",
-                {"zwrotnica_id": zwrotnica.id_wezel, "pozycja": zwrotnica.pozycja.value},
+                {"zwrotnica_id": zwrotnica.id_wezel, "pozycja": zwrotnica.pozycja.value, "wymuszenie": True},
             )
         return
 
@@ -256,6 +255,8 @@ def main():
         port=ustawienia_usb.get("port"),
         baudrate=int(ustawienia_usb.get("baudrate", 115200)),
         timeout=float(ustawienia_usb.get("timeout", 0.0)),
+        skala_w_metrach=float(loader.ustawienia_symulacji.get("skala_w_metrach", 100.0)),
+        rozmiar_kafelka_px=int(loader.ustawienia_symulacji.get("rozmiar_kafelka_px", 48)),
     )
 
     silnik = SilnikGraficzny(szerokosc_okna, wysokosc_okna, skaler)
@@ -267,11 +268,14 @@ def main():
     dziala = True
     zegar.przelacz_pauze()  # Start w trybie pauzy.
     ostatnia_pozycja_pan = None
+
+    # print(menedzer_pociagow.sledzenie_rozkladow.get("P01").rozklad.rozklad_do_string())
     
     while dziala:
         rzeczywista_delta_czasu = zegar_pygame.tick(60) / 1000.0
+        # Port USB jest nieblokujacy; kolejne etapy musza dzialac w jednej
+        # kolejnosci, aby dwa przebiegi SIPP nie wyslaly sprzecznych komend.
         most_usb.obsluz_wejscie()
-        # zaplanuj wydarzenia w zegarze symulacji na podstawie zdarzeń z USB
         most_usb.zaplanuj_wydarzenia_z_usb(zegar)
 
         for zdarzenie in py.event.get():

@@ -22,8 +22,8 @@
       "masa": 1.0,
       "dlugosc": 2,
       "pozycja_startowa": {
-        "x": -5,
-        "y": 8
+        "x": -8,
+        "y": 9
       },
       "kierunek_startowy": "ZACHOD",
       "rozklad": [
@@ -33,6 +33,115 @@
           "czas_postoju": 30.0,
           "przyjazd": "10:02:00",
           "odjazd": "10:03:00"
+        },
+        {
+          "nazwa_stacji": "Wejherowo-Nanice",
+          "id_stacji": "Wejherowo-Nanice",
+          "czas_postoju": 30.0,
+          "przyjazd": "10:04:00",
+          "odjazd": "10:05:00"
+        },
+        {
+          "nazwa_stacji": "Wejherowo-Śmiechowo",
+          "id_stacji": "Wejherowo-Śmiechowo",
+          "czas_postoju": 30.0,
+          "przyjazd": "10:07:00",
+          "odjazd": "10:08:00"
+        },
+        {
+          "nazwa_stacji": "Reda Pieleszewo",
+          "id_stacji": "Reda Pieleszewo",
+          "czas_postoju": 30.0,
+          "przyjazd": "10:10:00",
+          "odjazd": "10:11:00"
+        },
+        {
+          "nazwa_stacji": "Reda",
+          "id_stacji": "Reda",
+          "czas_postoju": 30.0,
+          "przyjazd": "10:14:00",
+          "odjazd": "10:15:00"
+        }
+      ]
+    },
+    {
+      "id": "P02",
+      "typ": "POSPIESZNY",
+      "max_predkosc_kmh": 120.0,
+      "przyspieszenie_bazowe": 1.2,
+      "hamowanie_bazowe": 0.8,
+      "masa": 1.0,
+      "dlugosc": 3,
+      "pozycja_startowa": {
+        "x": -8,
+        "y": 8
+      },
+      "kierunek_startowy": "ZACHOD",
+      "rozklad": [
+        {
+          "nazwa_stacji": "Wejherowo",
+          "id_stacji": "Wejherowo",
+          "czas_postoju": 30.0,
+          "przyjazd": "10:01:00",
+          "odjazd": "10:02:00"
+        },
+        {
+          "nazwa_stacji": "Reda",
+          "id_stacji": "Reda",
+          "czas_postoju": 30.0,
+          "przyjazd": "10:10:00",
+          "odjazd": "10:11:00"
+        }
+      ]
+    },
+    {
+      "id": "P03",
+      "typ": "OSOBOWY",
+      "max_predkosc_kmh": 80.0,
+      "przyspieszenie_bazowe": 0.8,
+      "hamowanie_bazowe": 0.8,
+      "masa": 1.0,
+      "dlugosc": 2,
+      "pozycja_startowa": {
+        "x": 116,
+        "y": 7
+      },
+      "kierunek_startowy": "WSCHOD",
+      "rozklad": [
+        {
+          "nazwa_stacji": "Reda",
+          "id_stacji": "Reda",
+          "czas_postoju": 30.0,
+          "przyjazd": "10:01:00",
+          "odjazd": "10:02:00"
+        },
+        {
+          "nazwa_stacji": "Reda Pieleszewo",
+          "id_stacji": "Reda Pieleszewo",
+          "czas_postoju": 30.0,
+          "przyjazd": "10:04:00",
+          "odjazd": "10:05:00"
+        },
+        {
+          "nazwa_stacji": "Wejherowo-Śmiechowo",
+          "id_stacji": "Wejherowo-Śmiechowo",
+          "czas_postoju": 30.0,
+          "przyjazd": "10:08:00",
+          "odjazd": "10:09:00"
+        },
+        {
+          "nazwa_stacji": "Wejherowo-Nanice",
+          "id_stacji": "Wejherowo-Nanice",
+          "czas_postoju": 30.0,
+          "przyjazd": "10:11:00",
+          "odjazd": "10:12:00"
+        },
+        {
+          "nazwa_stacji": "Wejherowo",
+          "id_stacji": "Wejherowo",
+          "czas_postoju": 30.0,
+          "przyjazd": "10:14:00",
+          "odjazd": "10:15:00"
         }
       ]
     }
@@ -550,58 +659,13 @@
         "x": 2,
         "y": 8,
         "polaczenia": {
-          "WSCHOD": {
-            "id_cel": "T37",
-            "kierunek_wejscia_cel": "WSCHOD"
-          },
           "ZACHOD": {
             "id_cel": "T20",
             "kierunek_wejscia_cel": "ZACHOD"
-          }
-        }
-      },
-      {
-        "id": "T37",
-        "x": 1,
-        "y": 8,
-        "polaczenia": {
-          "WSCHOD": {
-            "id_cel": "T38",
-            "kierunek_wejscia_cel": "WSCHOD"
           },
-          "ZACHOD": {
-            "id_cel": "T36",
-            "kierunek_wejscia_cel": "ZACHOD"
-          }
-        }
-      },
-      {
-        "id": "T38",
-        "x": 0,
-        "y": 8,
-        "polaczenia": {
           "WSCHOD": {
-            "id_cel": "T39",
-            "kierunek_wejscia_cel": "WSCHOD"
-          },
-          "ZACHOD": {
             "id_cel": "T37",
-            "kierunek_wejscia_cel": "ZACHOD"
-          }
-        }
-      },
-      {
-        "id": "T39",
-        "x": -1,
-        "y": 8,
-        "polaczenia": {
-          "WSCHOD": {
-            "id_cel": "T40",
             "kierunek_wejscia_cel": "WSCHOD"
-          },
-          "ZACHOD": {
-            "id_cel": "T38",
-            "kierunek_wejscia_cel": "ZACHOD"
           }
         }
       },
@@ -658,6 +722,10 @@
           "ZACHOD": {
             "id_cel": "T42",
             "kierunek_wejscia_cel": "ZACHOD"
+          },
+          "WSCHOD": {
+            "id_cel": "T310",
+            "kierunek_wejscia_cel": "WSCHOD"
           }
         }
       },
@@ -4698,6 +4766,470 @@
             "kierunek_wejscia_cel": "WSCHOD"
           }
         }
+      },
+      {
+        "id": "T37",
+        "x": 1,
+        "y": 8,
+        "polaczenia_plus": {
+          "ZACHOD": {
+            "id_cel": "T36",
+            "kierunek_wejscia_cel": "ZACHOD"
+          },
+          "WSCHOD": {
+            "id_cel": "T38",
+            "kierunek_wejscia_cel": "WSCHOD"
+          }
+        },
+        "polaczenia_minus": {
+          "ZACHOD": {
+            "id_cel": "T36",
+            "kierunek_wejscia_cel": "ZACHOD"
+          },
+          "POLNOC_WSCHOD": {
+            "id_cel": "T295",
+            "kierunek_wejscia_cel": "POLNOC_WSCHOD"
+          }
+        }
+      },
+      {
+        "id": "T38",
+        "x": 0,
+        "y": 8,
+        "polaczenia_plus": {
+          "WSCHOD": {
+            "id_cel": "T39",
+            "kierunek_wejscia_cel": "WSCHOD"
+          },
+          "ZACHOD": {
+            "id_cel": "T37",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        },
+        "polaczenia_minus": {
+          "POLNOC_WSCHOD": {
+            "id_cel": "T296",
+            "kierunek_wejscia_cel": "POLNOC_WSCHOD"
+          },
+          "ZACHOD": {
+            "id_cel": "T37",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T39",
+        "x": -1,
+        "y": 8,
+        "polaczenia_plus": {
+          "WSCHOD": {
+            "id_cel": "T40",
+            "kierunek_wejscia_cel": "WSCHOD"
+          },
+          "ZACHOD": {
+            "id_cel": "T38",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        },
+        "polaczenia_minus": {
+          "POLNOC_WSCHOD": {
+            "id_cel": "T297",
+            "kierunek_wejscia_cel": "POLNOC_WSCHOD"
+          },
+          "ZACHOD": {
+            "id_cel": "T38",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T295",
+        "x": 0,
+        "y": 9,
+        "polaczenia": {
+          "POLNOC_WSCHOD": {
+            "id_cel": "T298",
+            "kierunek_wejscia_cel": "POLNOC_WSCHOD"
+          },
+          "POLUDNIE_ZACHOD": {
+            "id_cel": "T37",
+            "kierunek_wejscia_cel": "POLUDNIE_ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T296",
+        "x": -1,
+        "y": 9,
+        "polaczenia": {
+          "POLNOC_WSCHOD": {
+            "id_cel": "T299",
+            "kierunek_wejscia_cel": "POLNOC_WSCHOD"
+          },
+          "POLUDNIE_ZACHOD": {
+            "id_cel": "T38",
+            "kierunek_wejscia_cel": "POLUDNIE_ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T297",
+        "x": -2,
+        "y": 9,
+        "polaczenia": {
+          "WSCHOD": {
+            "id_cel": "T301",
+            "kierunek_wejscia_cel": "WSCHOD"
+          },
+          "POLUDNIE_ZACHOD": {
+            "id_cel": "T39",
+            "kierunek_wejscia_cel": "POLUDNIE_ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T298",
+        "x": -1,
+        "y": 10,
+        "polaczenia": {
+          "POLNOC_WSCHOD": {
+            "id_cel": "T300",
+            "kierunek_wejscia_cel": "POLNOC_WSCHOD"
+          },
+          "POLUDNIE_ZACHOD": {
+            "id_cel": "T295",
+            "kierunek_wejscia_cel": "POLUDNIE_ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T299",
+        "x": -2,
+        "y": 10,
+        "polaczenia": {
+          "WSCHOD": {
+            "id_cel": "T304",
+            "kierunek_wejscia_cel": "WSCHOD"
+          },
+          "POLUDNIE_ZACHOD": {
+            "id_cel": "T296",
+            "kierunek_wejscia_cel": "POLUDNIE_ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T300",
+        "x": -2,
+        "y": 11,
+        "polaczenia": {
+          "WSCHOD": {
+            "id_cel": "T307",
+            "kierunek_wejscia_cel": "WSCHOD"
+          },
+          "POLUDNIE_ZACHOD": {
+            "id_cel": "T298",
+            "kierunek_wejscia_cel": "POLUDNIE_ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T301",
+        "x": -3,
+        "y": 9,
+        "polaczenia": {
+          "WSCHOD": {
+            "id_cel": "T302",
+            "kierunek_wejscia_cel": "WSCHOD"
+          },
+          "ZACHOD": {
+            "id_cel": "T297",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T302",
+        "x": -4,
+        "y": 9,
+        "polaczenia": {
+          "WSCHOD": {
+            "id_cel": "T303",
+            "kierunek_wejscia_cel": "WSCHOD"
+          },
+          "ZACHOD": {
+            "id_cel": "T301",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T303",
+        "x": -5,
+        "y": 9,
+        "polaczenia": {
+          "ZACHOD": {
+            "id_cel": "T302",
+            "kierunek_wejscia_cel": "ZACHOD"
+          },
+          "WSCHOD": {
+            "id_cel": "T313",
+            "kierunek_wejscia_cel": "WSCHOD"
+          }
+        }
+      },
+      {
+        "id": "T304",
+        "x": -3,
+        "y": 10,
+        "polaczenia": {
+          "WSCHOD": {
+            "id_cel": "T305",
+            "kierunek_wejscia_cel": "WSCHOD"
+          },
+          "ZACHOD": {
+            "id_cel": "T299",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T305",
+        "x": -4,
+        "y": 10,
+        "polaczenia": {
+          "WSCHOD": {
+            "id_cel": "T306",
+            "kierunek_wejscia_cel": "WSCHOD"
+          },
+          "ZACHOD": {
+            "id_cel": "T304",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T306",
+        "x": -5,
+        "y": 10,
+        "polaczenia": {
+          "ZACHOD": {
+            "id_cel": "T305",
+            "kierunek_wejscia_cel": "ZACHOD"
+          },
+          "WSCHOD": {
+            "id_cel": "T316",
+            "kierunek_wejscia_cel": "WSCHOD"
+          }
+        }
+      },
+      {
+        "id": "T307",
+        "x": -3,
+        "y": 11,
+        "polaczenia": {
+          "WSCHOD": {
+            "id_cel": "T308",
+            "kierunek_wejscia_cel": "WSCHOD"
+          },
+          "ZACHOD": {
+            "id_cel": "T300",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T308",
+        "x": -4,
+        "y": 11,
+        "polaczenia": {
+          "WSCHOD": {
+            "id_cel": "T309",
+            "kierunek_wejscia_cel": "WSCHOD"
+          },
+          "ZACHOD": {
+            "id_cel": "T307",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T309",
+        "x": -5,
+        "y": 11,
+        "polaczenia": {
+          "ZACHOD": {
+            "id_cel": "T308",
+            "kierunek_wejscia_cel": "ZACHOD"
+          },
+          "WSCHOD": {
+            "id_cel": "T319",
+            "kierunek_wejscia_cel": "WSCHOD"
+          }
+        }
+      },
+      {
+        "id": "T310",
+        "x": -6,
+        "y": 8,
+        "polaczenia": {
+          "WSCHOD": {
+            "id_cel": "T311",
+            "kierunek_wejscia_cel": "WSCHOD"
+          },
+          "ZACHOD": {
+            "id_cel": "T43",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T311",
+        "x": -7,
+        "y": 8,
+        "polaczenia": {
+          "WSCHOD": {
+            "id_cel": "T312",
+            "kierunek_wejscia_cel": "WSCHOD"
+          },
+          "ZACHOD": {
+            "id_cel": "T310",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T312",
+        "x": -8,
+        "y": 8,
+        "polaczenia": {
+          "ZACHOD": {
+            "id_cel": "T311",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T313",
+        "x": -6,
+        "y": 9,
+        "polaczenia": {
+          "WSCHOD": {
+            "id_cel": "T314",
+            "kierunek_wejscia_cel": "WSCHOD"
+          },
+          "ZACHOD": {
+            "id_cel": "T303",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T314",
+        "x": -7,
+        "y": 9,
+        "polaczenia": {
+          "ZACHOD": {
+            "id_cel": "T313",
+            "kierunek_wejscia_cel": "ZACHOD"
+          },
+          "WSCHOD": {
+            "id_cel": "T315",
+            "kierunek_wejscia_cel": "WSCHOD"
+          }
+        }
+      },
+      {
+        "id": "T315",
+        "x": -8,
+        "y": 9,
+        "polaczenia": {
+          "ZACHOD": {
+            "id_cel": "T314",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T316",
+        "x": -6,
+        "y": 10,
+        "polaczenia": {
+          "WSCHOD": {
+            "id_cel": "T317",
+            "kierunek_wejscia_cel": "WSCHOD"
+          },
+          "ZACHOD": {
+            "id_cel": "T306",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T317",
+        "x": -7,
+        "y": 10,
+        "polaczenia": {
+          "WSCHOD": {
+            "id_cel": "T318",
+            "kierunek_wejscia_cel": "WSCHOD"
+          },
+          "ZACHOD": {
+            "id_cel": "T316",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T318",
+        "x": -8,
+        "y": 10,
+        "polaczenia": {
+          "ZACHOD": {
+            "id_cel": "T317",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T319",
+        "x": -6,
+        "y": 11,
+        "polaczenia": {
+          "WSCHOD": {
+            "id_cel": "T320",
+            "kierunek_wejscia_cel": "WSCHOD"
+          },
+          "ZACHOD": {
+            "id_cel": "T309",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T320",
+        "x": -7,
+        "y": 11,
+        "polaczenia": {
+          "WSCHOD": {
+            "id_cel": "T321",
+            "kierunek_wejscia_cel": "WSCHOD"
+          },
+          "ZACHOD": {
+            "id_cel": "T319",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T321",
+        "x": -8,
+        "y": 11,
+        "polaczenia": {
+          "ZACHOD": {
+            "id_cel": "T320",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        }
       }
     ],
     "zwrotnice": [
@@ -5807,6 +6339,129 @@
             "kierunek_wejscia_cel": "POLNOC_WSCHOD"
           }
         }
+      },
+      {
+        "id": "T37",
+        "x": 1,
+        "y": 8,
+        "kierunek_glowny": "ZACHOD",
+        "kierunek_zwrotny_plus": "WSCHOD",
+        "kierunek_zwrotny_minus": "POLNOC_WSCHOD",
+        "polaczenie_glowne": {
+          "id_cel": "T38",
+          "kierunek_wejscia_cel": "WSCHOD"
+        },
+        "polaczenie_zwrotne_plus": {
+          "id_cel": "T36",
+          "kierunek_wejscia_cel": "ZACHOD"
+        },
+        "polaczenie_zwrotne_minus": {
+          "id_cel": "T36",
+          "kierunek_wejscia_cel": "ZACHOD"
+        },
+        "stan_awaryjny": false,
+        "polaczenia_plus": {
+          "ZACHOD": {
+            "id_cel": "T36",
+            "kierunek_wejscia_cel": "ZACHOD"
+          },
+          "WSCHOD": {
+            "id_cel": "T38",
+            "kierunek_wejscia_cel": "WSCHOD"
+          }
+        },
+        "polaczenia_minus": {
+          "ZACHOD": {
+            "id_cel": "T36",
+            "kierunek_wejscia_cel": "ZACHOD"
+          },
+          "POLNOC_WSCHOD": {
+            "id_cel": "T295",
+            "kierunek_wejscia_cel": "POLNOC_WSCHOD"
+          }
+        }
+      },
+      {
+        "id": "T38",
+        "x": 0,
+        "y": 8,
+        "kierunek_glowny": "ZACHOD",
+        "kierunek_zwrotny_plus": "WSCHOD",
+        "kierunek_zwrotny_minus": "POLNOC_WSCHOD",
+        "polaczenie_glowne": {
+          "id_cel": "T39",
+          "kierunek_wejscia_cel": "WSCHOD"
+        },
+        "polaczenie_zwrotne_plus": {
+          "id_cel": "T37",
+          "kierunek_wejscia_cel": "ZACHOD"
+        },
+        "polaczenie_zwrotne_minus": {
+          "id_cel": "T37",
+          "kierunek_wejscia_cel": "ZACHOD"
+        },
+        "stan_awaryjny": false,
+        "polaczenia_plus": {
+          "WSCHOD": {
+            "id_cel": "T39",
+            "kierunek_wejscia_cel": "WSCHOD"
+          },
+          "ZACHOD": {
+            "id_cel": "T37",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        },
+        "polaczenia_minus": {
+          "POLNOC_WSCHOD": {
+            "id_cel": "T296",
+            "kierunek_wejscia_cel": "POLNOC_WSCHOD"
+          },
+          "ZACHOD": {
+            "id_cel": "T37",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        }
+      },
+      {
+        "id": "T39",
+        "x": -1,
+        "y": 8,
+        "kierunek_glowny": "ZACHOD",
+        "kierunek_zwrotny_plus": "WSCHOD",
+        "kierunek_zwrotny_minus": "POLNOC_WSCHOD",
+        "polaczenie_glowne": {
+          "id_cel": "T40",
+          "kierunek_wejscia_cel": "WSCHOD"
+        },
+        "polaczenie_zwrotne_plus": {
+          "id_cel": "T38",
+          "kierunek_wejscia_cel": "ZACHOD"
+        },
+        "polaczenie_zwrotne_minus": {
+          "id_cel": "T38",
+          "kierunek_wejscia_cel": "ZACHOD"
+        },
+        "stan_awaryjny": false,
+        "polaczenia_plus": {
+          "WSCHOD": {
+            "id_cel": "T40",
+            "kierunek_wejscia_cel": "WSCHOD"
+          },
+          "ZACHOD": {
+            "id_cel": "T38",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        },
+        "polaczenia_minus": {
+          "POLNOC_WSCHOD": {
+            "id_cel": "T297",
+            "kierunek_wejscia_cel": "POLNOC_WSCHOD"
+          },
+          "ZACHOD": {
+            "id_cel": "T38",
+            "kierunek_wejscia_cel": "ZACHOD"
+          }
+        }
       }
     ],
     "semafory": [
@@ -5817,22 +6472,10 @@
         "domyslny_stan": "CZERWONY"
       },
       {
-        "id": "S02",
-        "id_toru": "T43",
-        "kierunek_semafora": "WSCHOD",
-        "domyslny_stan": "CZERWONY"
-      },
-      {
-        "id": "S03",
-        "id_toru": "T36",
-        "kierunek_semafora": "ZACHOD",
-        "domyslny_stan": "ZIELONY"
-      },
-      {
         "id": "S04",
         "id_toru": "T60",
         "kierunek_semafora": "ZACHOD",
-        "domyslny_stan": "CZERWONY"
+        "domyslny_stan": "ZIELONY"
       },
       {
         "id": "S06",
@@ -5856,13 +6499,13 @@
         "id": "S11",
         "id_toru": "T26",
         "kierunek_semafora": "ZACHOD",
-        "domyslny_stan": "CZERWONY"
+        "domyslny_stan": "ZIELONY"
       },
       {
         "id": "S08",
         "id_toru": "T18",
         "kierunek_semafora": "ZACHOD",
-        "domyslny_stan": "CZERWONY"
+        "domyslny_stan": "ZIELONY"
       },
       {
         "id": "S09",
@@ -5892,7 +6535,7 @@
         "id": "S15",
         "id_toru": "T68",
         "kierunek_semafora": "ZACHOD",
-        "domyslny_stan": "CZERWONY"
+        "domyslny_stan": "ZIELONY"
       },
       {
         "id": "S16",
@@ -5910,49 +6553,49 @@
         "id": "S18",
         "id_toru": "T62",
         "kierunek_semafora": "WSCHOD",
-        "domyslny_stan": "ZIELONY"
+        "domyslny_stan": "CZERWONY"
       },
       {
         "id": "S19",
         "id_toru": "T82",
         "kierunek_semafora": "WSCHOD",
-        "domyslny_stan": "CZERWONY"
+        "domyslny_stan": "ZIELONY"
       },
       {
         "id": "S23",
         "id_toru": "T112",
         "kierunek_semafora": "ZACHOD",
-        "domyslny_stan": "CZERWONY"
+        "domyslny_stan": "ZIELONY"
       },
       {
         "id": "S20",
         "id_toru": "T80",
         "kierunek_semafora": "ZACHOD",
-        "domyslny_stan": "CZERWONY"
+        "domyslny_stan": "ZIELONY"
       },
       {
         "id": "S05",
         "id_toru": "T81",
         "kierunek_semafora": "WSCHOD",
-        "domyslny_stan": "CZERWONY"
+        "domyslny_stan": "ZIELONY"
       },
       {
         "id": "S27",
         "id_toru": "T115",
         "kierunek_semafora": "WSCHOD",
-        "domyslny_stan": "CZERWONY"
+        "domyslny_stan": "ZIELONY"
       },
       {
         "id": "S28",
         "id_toru": "T114",
         "kierunek_semafora": "ZACHOD",
-        "domyslny_stan": "CZERWONY"
+        "domyslny_stan": "ZIELONY"
       },
       {
         "id": "S21",
         "id_toru": "T117",
         "kierunek_semafora": "WSCHOD",
-        "domyslny_stan": "CZERWONY"
+        "domyslny_stan": "ZIELONY"
       },
       {
         "id": "S22",
@@ -5964,19 +6607,19 @@
         "id": "S24",
         "id_toru": "T173",
         "kierunek_semafora": "WSCHOD",
-        "domyslny_stan": "CZERWONY"
+        "domyslny_stan": "ZIELONY"
       },
       {
         "id": "S25",
         "id_toru": "T166",
         "kierunek_semafora": "ZACHOD",
-        "domyslny_stan": "CZERWONY"
+        "domyslny_stan": "ZIELONY"
       },
       {
         "id": "S26",
         "id_toru": "T167",
         "kierunek_semafora": "WSCHOD",
-        "domyslny_stan": "CZERWONY"
+        "domyslny_stan": "ZIELONY"
       },
       {
         "id": "S29",
@@ -6024,7 +6667,7 @@
         "id": "S36",
         "id_toru": "T247",
         "kierunek_semafora": "WSCHOD",
-        "domyslny_stan": "CZERWONY"
+        "domyslny_stan": "ZIELONY"
       },
       {
         "id": "S37",
@@ -6048,7 +6691,7 @@
         "id": "S40",
         "id_toru": "T243",
         "kierunek_semafora": "WSCHOD",
-        "domyslny_stan": "CZERWONY"
+        "domyslny_stan": "ZIELONY"
       },
       {
         "id": "S41",
@@ -6072,6 +6715,54 @@
         "id": "S44",
         "id_toru": "T294",
         "kierunek_semafora": "ZACHOD",
+        "domyslny_stan": "CZERWONY"
+      },
+      {
+        "id": "S47",
+        "id_toru": "T40",
+        "kierunek_semafora": "ZACHOD",
+        "domyslny_stan": "ZIELONY"
+      },
+      {
+        "id": "S48",
+        "id_toru": "T297",
+        "kierunek_semafora": "ZACHOD",
+        "domyslny_stan": "CZERWONY"
+      },
+      {
+        "id": "S49",
+        "id_toru": "T296",
+        "kierunek_semafora": "POLUDNIE_ZACHOD",
+        "domyslny_stan": "CZERWONY"
+      },
+      {
+        "id": "S50",
+        "id_toru": "T295",
+        "kierunek_semafora": "POLUDNIE_ZACHOD",
+        "domyslny_stan": "CZERWONY"
+      },
+      {
+        "id": "S02",
+        "id_toru": "T312",
+        "kierunek_semafora": "WSCHOD",
+        "domyslny_stan": "CZERWONY"
+      },
+      {
+        "id": "S03",
+        "id_toru": "T315",
+        "kierunek_semafora": "WSCHOD",
+        "domyslny_stan": "CZERWONY"
+      },
+      {
+        "id": "S45",
+        "id_toru": "T318",
+        "kierunek_semafora": "WSCHOD",
+        "domyslny_stan": "CZERWONY"
+      },
+      {
+        "id": "S46",
+        "id_toru": "T321",
+        "kierunek_semafora": "WSCHOD",
         "domyslny_stan": "CZERWONY"
       }
     ],
