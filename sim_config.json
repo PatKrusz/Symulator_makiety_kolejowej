@@ -68,8 +68,8 @@
       "id": "P02",
       "typ": "POSPIESZNY",
       "max_predkosc_kmh": 120.0,
-      "przyspieszenie_bazowe": 1.2,
-      "hamowanie_bazowe": 0.8,
+      "przyspieszenie_bazowe": 1.0,
+      "hamowanie_bazowe": 1.0,
       "masa": 1.0,
       "dlugosc": 3,
       "pozycja_startowa": {

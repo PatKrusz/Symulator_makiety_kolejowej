@@ -382,6 +382,8 @@ def main():
 
             podpis_edytora = nowy_podpis
 
+        most_usb.zsynchronizuj_pauze(zegar.pauza or edytor.aktywny)
+
         symulowana_delta_czasu = 0.0 if edytor.aktywny else zegar.aktualizuj_czas(rzeczywista_delta_czasu)
         if not zegar.pauza and not edytor.aktywny:
             zdarzenia = menedzer_pociagow.aktualizuj(

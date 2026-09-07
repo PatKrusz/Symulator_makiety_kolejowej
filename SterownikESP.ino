@@ -105,6 +105,7 @@ struct Pociag {
   bool przekroczenie_czerwonego; // czy pociąg przekroczył czerwone światło
   bool zatrzymany_na_czerwonym;
   bool na_postoju_stacyjnym;
+  bool reczny_postoj;
   bool awaria;
   bool rozklad_zaladowany;
   uint16_t indeks_nastepnego_przystanku;
@@ -121,6 +122,7 @@ std::map<uint16_t, Pociag> mapa_pociagow;
 uint32_t aktualny_czas_symulacji = 0; // w sekundach od początku symulacji przesunięte o czas startu symulacji
 bool awaria = false; // czy ESTOP został włączony
 bool DEBUG = true; // czy włączyć debugowanie
+bool zegar_symulacji_zapauzowany = false;
 
 float skala_w_metrach = 100.0; // domyślna skala w metrach (1 kafelek = 100 metrów)
 uint8_t rozmiar_kafelka_w_px = 48; // domyślny rozmiar kafelka w pikselach
@@ -150,8 +152,8 @@ void obsluzMapeSekcji(String jsonStr);
 void obsluzOdpowiedzDAT(String wiadomosc);
 void przetworzLinie(String linia);
 uint16_t modyfikujId(const char* str);
-void przestawZwrotnice(String id, String pozycja);
-void ustawSygnal(String id, String sygnal);
+void przestawZwrotnice(uint16_t id, String pozycja);
+void ustawSygnal(uint16_t id, String sygnal);
 void poprawZwrotnice();
 void wjazdDoSekcji(uint16_t pociag_id, uint16_t sekcja_id, uint32_t czas);
 void pytaj_o_pociag(uint16_t pociag_id);
@@ -165,16 +167,28 @@ bool synchronizujCzasZRamy(const String& ramka);
 void przeliczSterowanieSIPP();
 void sprawdzPrzekroczoneRezerwacje();
 void zatrzymajRuchWokolSekcji(uint16_t id_sekcji);
+void zwolnijRezerwacjePociagu(uint16_t pociag_id);
 void ustawSygnaIStanZwrotnicSIPP();
 uint32_t obliczCzasPrzejazdu(uint16_t pociag_id, uint16_t sekcja_id, uint16_t sekcja_docelowa_id);
 Sygnal sygnalDlaZajetosci(uint16_t sekcja_zrodlowa, uint16_t sekcja_docelowa);
 bool pociagMaRezerwacjePrzejazdu(uint16_t id_pociagu, uint16_t sekcja_zrodlowa, uint16_t sekcja_docelowa);
 bool zwrotnicaJestWStrefieInnegoPociagu(uint16_t id_zwrotnicy, uint16_t id_pociagu);
 bool wszystkieRozkladyZaladowane();
+bool rezerwacjaAktywnaLubChroniona(const OknoCzasowe& rezerwacja);
+bool rezerwacjaWygasla(const OknoCzasowe& rezerwacja);
+void oczyscNieaktywneRezerwacje();
+void usunPrzyszleRezerwacjePociagu(uint16_t id_pociagu);
+void dodajRezerwacjeJesliBrak(std::vector<OknoCzasowe>& rezerwacje, const OknoCzasowe& nowa_rezerwacja);
+bool pociagMozeMinacSemafor(uint16_t id_semafora, const Pociag& pociag);
+bool pociagMaBlokujacySZNaWyjezdzie(const Pociag& pociag);
+bool zaproponujZmianeKierunkuJesliPotrzebna(Pociag& pociag);
 uint32_t najblizszyWolnyCzasZwrotnicy(uint16_t id_zwrotnicy, uint16_t id_pociagu, uint32_t czas_start, uint32_t czas_trwania);
 float prawostronnyWynikSekcji(const Sekcja& sekcja, Kierunek kierunek);
 bool sekcjaMaRezerwacjeInnegoPociagu(const Sekcja& sekcja, uint16_t id_pociagu);
 Kierunek kierunekZTekstu(const String& kierunek);
+Kierunek kierunekPrzeciwny(Kierunek kierunek);
+String kierunekDoTekstu(Kierunek kierunek);
+bool ustawSygnalJesliNieSZ(uint16_t id, String sygnal);
 uint32_t konwertujCzasNaSekundy(const String& czasStr) {
   if (czasStr.length() == 0 || czasStr == "-") return 0;
   int godziny = 0, minuty = 0, sekundy = 0;
@@ -204,8 +218,42 @@ Kierunek kierunekZTekstu(const String& kierunek) {
   return Kierunek::ZACHOD;
 }
 
+Kierunek kierunekPrzeciwny(Kierunek kierunek) {
+  switch (kierunek) {
+    case Kierunek::POLNOC: return Kierunek::POLUDNIE;
+    case Kierunek::POLUDNIE: return Kierunek::POLNOC;
+    case Kierunek::WSCHOD: return Kierunek::ZACHOD;
+    case Kierunek::ZACHOD: return Kierunek::WSCHOD;
+    case Kierunek::POLNOC_WSCHOD: return Kierunek::POLUDNIE_ZACHOD;
+    case Kierunek::POLUDNIE_ZACHOD: return Kierunek::POLNOC_WSCHOD;
+    case Kierunek::POLNOC_ZACHOD: return Kierunek::POLUDNIE_WSCHOD;
+    case Kierunek::POLUDNIE_WSCHOD: return Kierunek::POLNOC_ZACHOD;
+  }
+  return Kierunek::ZACHOD;
+}
+
+String kierunekDoTekstu(Kierunek kierunek) {
+  switch (kierunek) {
+    case Kierunek::POLNOC: return "POLNOC";
+    case Kierunek::POLUDNIE: return "POLUDNIE";
+    case Kierunek::WSCHOD: return "WSCHOD";
+    case Kierunek::ZACHOD: return "ZACHOD";
+    case Kierunek::POLNOC_WSCHOD: return "POLNOC_WSCHOD";
+    case Kierunek::POLNOC_ZACHOD: return "POLNOC_ZACHOD";
+    case Kierunek::POLUDNIE_WSCHOD: return "POLUDNIE_WSCHOD";
+    case Kierunek::POLUDNIE_ZACHOD: return "POLUDNIE_ZACHOD";
+  }
+  return "ZACHOD";
+}
+
 void aktualizujCzasWewnetrzny() {
   uint32_t teraz_ms = millis();
+  if (zegar_symulacji_zapauzowany) {
+    ostatnia_aktualizacja_czasu_ms = teraz_ms;
+    reszta_czasu_symulacji_ms = 0.0f;
+    return;
+  }
+
   if (ostatnia_aktualizacja_czasu_ms == 0) {
     ostatnia_aktualizacja_czasu_ms = teraz_ms;
     return;
@@ -267,7 +315,9 @@ void setup() {
 
 void loop() {
   aktualizujCzasWewnetrzny();
-  sprawdzPrzekroczoneRezerwacje();
+  if (!zegar_symulacji_zapauzowany) {
+    sprawdzPrzekroczoneRezerwacje();
+  }
 
   // Nieblokujący odczyt linii ze strumienia
   if (Serial.available() > 0) {
@@ -287,7 +337,7 @@ void przetworzLinie(String linia) {
   aktualizujCzasWewnetrzny();
 
   int pierwszyDwukropek = linia.indexOf(':');
-  
+
   if (pierwszyDwukropek == -1) {
     // Ramka bez dwukropka (np. sam tekst)
     return;
@@ -304,10 +354,18 @@ void przetworzLinie(String linia) {
 
   // 1. ZDARZENIA ASYNCHRONICZNE (EVT)
   if (typ == "EVT") {
-    if (tresc.startsWith("MAPA_SEKCJI:")) {
+    if (tresc.startsWith("PAU:")) {
+      std::vector<String> tokeny = rozdzielTekst(tresc, ':');
+      if (tokeny.size() >= 2) {
+        zegar_symulacji_zapauzowany = tokeny[1] == "1" || tokeny[1] == "ON" || tokeny[1] == "TRUE";
+        ostatnia_aktualizacja_czasu_ms = millis();
+        reszta_czasu_symulacji_ms = 0.0f;
+      }
+    }
+    else if (tresc.startsWith("MAPA_SEKCJI:")) {
       String jsonMap = tresc.substring(12); // Odtcinamy prefiks "MAPA_SEKCJI:"
       obsluzMapeSekcji(jsonMap);
-    } 
+    }
     else if (tresc.startsWith("SEK_WJA:")) {
       // Format: EVT:SEK_WJA:pociag_id:sekcja_id:kierunek:czas
       // jeśli pociąg nie istnieje w mapie_pociagow, to go rejestrujemy
@@ -447,7 +505,23 @@ void przetworzLinie(String linia) {
         uint16_t id_pociagu = modyfikujId(tokeny[1].c_str());
         auto it_pociagu = mapa_pociagow.find(id_pociagu);
         if (it_pociagu != mapa_pociagow.end()) {
-          it_pociagu->second.na_postoju_stacyjnym = true;
+          Pociag& pociag = it_pociagu->second;
+          pociag.na_postoju_stacyjnym = true;
+          if (tokeny.size() >= 3 && pociag.indeks_nastepnego_przystanku < pociag.rozklad.size() &&
+              pociag.rozklad[pociag.indeks_nastepnego_przystanku].stacja_docelowa == tokeny[2]) {
+            pociag.indeks_nastepnego_przystanku++;
+          }
+        }
+      }
+    }
+    else if (tresc.startsWith("RSTP:")) {
+      // Format: EVT:RSTP:pociag_id:0|1:czas
+      std::vector<String> tokeny = rozdzielTekst(tresc, ':');
+      if (tokeny.size() >= 3) {
+        uint16_t id_pociagu = modyfikujId(tokeny[1].c_str());
+        auto it_pociagu = mapa_pociagow.find(id_pociagu);
+        if (it_pociagu != mapa_pociagow.end()) {
+          it_pociagu->second.reczny_postoj = tokeny[2] == "1" || tokeny[2] == "ON" || tokeny[2] == "TRUE";
         }
       }
     }
@@ -474,7 +548,7 @@ void przetworzLinie(String linia) {
     }
     if (tresc.startsWith("MAPA_SEKCJI:") || tresc.startsWith("SEK_WJA:") ||
       tresc.startsWith("SEK_WYJ:") || tresc.startsWith("CZE_ODJ:") ||
-      tresc.startsWith("ODJ:") ||
+      tresc.startsWith("STP:") || tresc.startsWith("ODJ:") ||
         tresc.startsWith("AWR:")) {
       przeliczSterowanieSIPP();
     }
@@ -660,7 +734,7 @@ void obsluzOdpowiedzDAT(String wiadomosc) {
   String dane = wiadomosc.substring(idx + 1);
 
   if (komenda == "POC") {
-    // Format: POC:id:pred_akt:pred_doc:pred_kmh:typ:kier:czolo:ogon:dlugosc:sekcja:stacja_nast:przyj:odj:postoj:czer_aktyw:czer_sem:pred_max
+    // Format: POC:id:pred_akt:pred_doc:pred_kmh:typ:kier:czolo:ogon:dlugosc:sekcja:stacja_nast:przyj:odj:postoj:czer_aktyw:czer_sem:pred_max:reczny_postoj
     std::vector<String> tokeny = rozdzielTekst(dane, ':');
     if (tokeny.size() >= 9) {
       uint16_t pociag_id = modyfikujId(tokeny[0].c_str());
@@ -691,6 +765,7 @@ void obsluzOdpowiedzDAT(String wiadomosc) {
         pociag.dlugosc = (uint16_t)tokeny[8].toInt();
         if (tokeny.size() >= 10) pociag.czolo = modyfikujId(tokeny[9].c_str());
         if (tokeny.size() >= 17) pociag.predkosc_max_pxs = tokeny[16].toFloat();
+        if (tokeny.size() >= 18) pociag.reczny_postoj = tokeny[17] == "1";
 
         if (tokeny.size() >= 14) {
           pociag.czas_postoju = (uint16_t)tokeny[13].toInt();
@@ -922,6 +997,7 @@ void wjazdDoSekcji(uint16_t pociag_id, uint16_t sekcja_id, uint32_t czas) {
     p.przekroczenie_czerwonego = false;
     p.zatrzymany_na_czerwonym = false;
     p.na_postoju_stacyjnym = false;
+    p.reczny_postoj = false;
     p.awaria = false;
     p.rozklad_zaladowany = false;
     p.indeks_nastepnego_przystanku = 0;
@@ -961,6 +1037,7 @@ void wjazdDoSekcji(uint16_t pociag_id, uint16_t sekcja_id, uint32_t czas) {
     Serial.print("-> [ESP32 ERROR] Nieznana sekcja: ");
     Serial.println(sekcja_id);
   }
+  zwolnijRezerwacjePociagu(pociag_id);
 }
 
 void wyjazdZSekcji(uint16_t pociag_id, uint16_t sekcja_id, uint32_t czas) {
@@ -985,6 +1062,7 @@ void wyjazdZSekcji(uint16_t pociag_id, uint16_t sekcja_id, uint32_t czas) {
       Serial.println(czas);
     }
   }
+  // zwolnijRezerwacjePociagu(pociag_id);
 }
 
 // --- FUNKCJE POMOCNICZE DO WYSYŁANIA KOMEND Z ESP32 DO PYTHONA ---
@@ -996,6 +1074,19 @@ void przestawZwrotnice(uint16_t id, String pozycja) {
   Serial.print(idStr);
   Serial.print(":");
   Serial.println(pozycja);
+}
+
+bool ustawSygnalJesliNieSZ(uint16_t id, String sygnal) {
+  auto it = mapa_semaforow.find(id);
+  if (it != mapa_semaforow.end() && it->second.sygnal == Sygnal::SZ && sygnal != "SZ") {
+    if (DEBUG) {
+      Serial.print("[SIPP] Pomijam nadpisanie SZ na S");
+      Serial.println(id);
+    }
+    return false;
+  }
+  ustawSygnal(id, sygnal);
+  return true;
 }
 
 void ustawSygnal(uint16_t id, String sygnal) {
@@ -1033,12 +1124,12 @@ void wylaczLimitPredkosci(uint16_t id) {
 }
 
 void zmienKierunekPociagu(uint16_t id, Kierunek kierunek) {
-  // Wysyła np. KIR:P01:2
+  // Wysyła np. KIR:P01:WSCHOD
   Serial.print("KIR:");
   String idStr = odwrotnieModyfikujId(id, "P");
   Serial.print(idStr);
   Serial.print(":");
-  Serial.println(static_cast<uint8_t>(kierunek));
+  Serial.println(kierunekDoTekstu(kierunek));
 }
 
 void ESTOP(){
@@ -1117,7 +1208,7 @@ void ustawSygnalyDlaPolaczenia(uint16_t sekcja_id, uint16_t sekcja_docelowa_id) 
     const Sekcja& sekcja = it->second;
     for (const auto& pol : sekcja.polaczenia) {
       if (pol.id_sekcji_docelowej == sekcja_docelowa_id) {
-        ustawSygnal(pol.id_semafora, "ZIE"); // Ustawienie sygnału na zielony
+        ustawSygnalJesliNieSZ(pol.id_semafora, "ZIE"); // Ustawienie sygnału na zielony
       }
     }
   }
@@ -1177,6 +1268,29 @@ bool sekcjaMaRezerwacjeInnegoPociagu(const Sekcja& sekcja, uint16_t id_pociagu) 
   return false;
 }
 
+bool pociagMozeMinacSemafor(uint16_t id_semafora, const Pociag& pociag) {
+  auto it = mapa_semaforow.find(id_semafora);
+  if (it == mapa_semaforow.end()) return true;
+  if (it->second.sygnal != Sygnal::SZ) return true;
+  return pociag.typ == TypPociagu::TECHNICZNY;
+}
+
+bool pociagMaBlokujacySZNaWyjezdzie(const Pociag& pociag) {
+  if (pociag.typ == TypPociagu::TECHNICZNY) return false;
+
+  auto it_sekcji = mapa_sekcji.find(pociag.czolo);
+  if (it_sekcji == mapa_sekcji.end()) return false;
+
+  for (const auto& polaczenie : it_sekcji->second.polaczenia) {
+    auto it_semafora = mapa_semaforow.find(polaczenie.id_semafora);
+    if (it_semafora != mapa_semaforow.end() && it_semafora->second.sygnal == Sygnal::SZ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 bool znajdzTraseDoPeronu(
     const Pociag& pociag,
     std::vector<uint16_t>& trasa) {
@@ -1233,12 +1347,11 @@ bool znajdzTraseDoPeronu(
 
     for (const PolaczenieSekcji* polaczenie_wsk : polaczenia_posortowane) {
       const PolaczenieSekcji& polaczenie = *polaczenie_wsk;
+      if (!pociagMozeMinacSemafor(polaczenie.id_semafora, pociag)) continue;
       uint16_t sasiad = polaczenie.id_sekcji_docelowej;
       if (poprzednik.find(sasiad) != poprzednik.end()) continue;
       auto it_sasiada = mapa_sekcji.find(sasiad);
       if (it_sasiada == mapa_sekcji.end()) continue;
-      if (it_sasiada->second.zajeta && it_sasiada->second.pociag_id != pociag.id) continue;
-      if (sekcjaMaRezerwacjeInnegoPociagu(it_sasiada->second, pociag.id)) continue;
       poprzednik[sasiad] = aktualna;
       glebokosc[sasiad] = glebokosc[aktualna] + 1;
       kolejka.push_back(sasiad);
@@ -1264,6 +1377,30 @@ const PolaczenieSekcji* znajdzPolaczenie(uint16_t zrodlo, uint16_t cel) {
   return nullptr;
 }
 
+bool zaproponujZmianeKierunkuJesliPotrzebna(Pociag& pociag) {
+  if (pociag.indeks_nastepnego_przystanku >= pociag.rozklad.size()) return false;
+
+  std::vector<uint16_t> trasa_obecna;
+  bool obecna_ok = znajdzTraseDoPeronu(pociag, trasa_obecna);
+
+  Pociag pociag_w_przeciwnym = pociag;
+  pociag_w_przeciwnym.kierunek = kierunekPrzeciwny(pociag.kierunek);
+  std::vector<uint16_t> trasa_przeciwna;
+  bool przeciwna_ok = znajdzTraseDoPeronu(pociag_w_przeciwnym, trasa_przeciwna);
+
+  if (!przeciwna_ok || trasa_przeciwna.empty()) return false;
+  if (obecna_ok && !trasa_obecna.empty() && trasa_obecna.size() <= trasa_przeciwna.size()) return false;
+
+  zmienKierunekPociagu(pociag.id, pociag_w_przeciwnym.kierunek);
+  if (DEBUG) {
+    Serial.print("[SIPP] Zaproponowano zmiane kierunku P");
+    Serial.print(pociag.id);
+    Serial.print(" na ");
+    Serial.println(kierunekDoTekstu(pociag_w_przeciwnym.kierunek));
+  }
+  return true;
+}
+
 uint32_t najblizszyWolnyCzasSekcji(
     uint16_t id_sekcji,
     uint16_t id_pociagu,
@@ -1272,10 +1409,15 @@ uint32_t najblizszyWolnyCzasSekcji(
   auto it = mapa_sekcji.find(id_sekcji);
   if (it == mapa_sekcji.end()) return UINT32_MAX;
   if (it->second.zajeta && it->second.pociag_id != id_pociagu) {
-    return UINT32_MAX;
-  }
-  if (sekcjaMaRezerwacjeInnegoPociagu(it->second, id_pociagu)) {
-    return UINT32_MAX;
+    bool znaleziono_okno_zajmujacego = false;
+    for (const auto& rezerwacja : it->second.rezerwacje) {
+      if (rezerwacja.id_pociagu == it->second.pociag_id) {
+        uint32_t koniec_zajetosci = rezerwacja.czas_koniec + ZAPAS_REZERWACJI_S;
+        if (koniec_zajetosci > czas_start) czas_start = koniec_zajetosci;
+        znaleziono_okno_zajmujacego = true;
+      }
+    }
+    if (!znaleziono_okno_zajmujacego) return UINT32_MAX;
   }
 
   bool znaleziono_konflikt = true;
@@ -1320,8 +1462,77 @@ uint32_t najblizszyWolnyCzasZwrotnicy(
   return czas_start;
 }
 
+bool rezerwacjaAktywnaLubChroniona(const OknoCzasowe& rezerwacja) {
+  return rezerwacja.czas_start <= aktualny_czas_symulacji &&
+      aktualny_czas_symulacji < rezerwacja.czas_koniec + ZAPAS_REZERWACJI_S;
+}
+
+bool rezerwacjaWygasla(const OknoCzasowe& rezerwacja) {
+  return aktualny_czas_symulacji >= rezerwacja.czas_koniec + ZAPAS_REZERWACJI_S;
+}
+
+void oczyscNieaktywneRezerwacje() {
+  for (auto& [id, sekcja] : mapa_sekcji) {
+    sekcja.rezerwacje.erase(
+        std::remove_if(sekcja.rezerwacje.begin(), sekcja.rezerwacje.end(),
+            [](const OknoCzasowe& rezerwacja) {
+              return rezerwacjaWygasla(rezerwacja);
+            }),
+        sekcja.rezerwacje.end());
+  }
+
+  for (auto& [id, zwrotnica] : mapa_zwrotnic) {
+    zwrotnica.rezerwacje.erase(
+        std::remove_if(zwrotnica.rezerwacje.begin(), zwrotnica.rezerwacje.end(),
+            [](const OknoCzasowe& rezerwacja) {
+              return rezerwacjaWygasla(rezerwacja);
+            }),
+        zwrotnica.rezerwacje.end());
+  }
+}
+
+void usunPrzyszleRezerwacjePociagu(uint16_t id_pociagu) {
+  for (auto& [id, sekcja] : mapa_sekcji) {
+    sekcja.rezerwacje.erase(
+        std::remove_if(sekcja.rezerwacje.begin(), sekcja.rezerwacje.end(),
+            [id_pociagu](const OknoCzasowe& rezerwacja) {
+              return rezerwacja.id_pociagu == id_pociagu &&
+                  rezerwacja.czas_start > aktualny_czas_symulacji;
+            }),
+        sekcja.rezerwacje.end());
+  }
+
+  for (auto& [id, zwrotnica] : mapa_zwrotnic) {
+    zwrotnica.rezerwacje.erase(
+        std::remove_if(zwrotnica.rezerwacje.begin(), zwrotnica.rezerwacje.end(),
+            [id_pociagu](const OknoCzasowe& rezerwacja) {
+              return rezerwacja.id_pociagu == id_pociagu &&
+                  rezerwacja.czas_start > aktualny_czas_symulacji;
+            }),
+        zwrotnica.rezerwacje.end());
+  }
+}
+
+void dodajRezerwacjeJesliBrak(std::vector<OknoCzasowe>& rezerwacje, const OknoCzasowe& nowa_rezerwacja) {
+  for (const auto& rezerwacja : rezerwacje) {
+    if (rezerwacja.id_pociagu == nowa_rezerwacja.id_pociagu &&
+        rezerwacja.czas_start == nowa_rezerwacja.czas_start &&
+        rezerwacja.czas_koniec == nowa_rezerwacja.czas_koniec &&
+        rezerwacja.sekcja_zrodlowa == nowa_rezerwacja.sekcja_zrodlowa &&
+        rezerwacja.sekcja_docelowa == nowa_rezerwacja.sekcja_docelowa) {
+      return;
+    }
+  }
+  rezerwacje.push_back(nowa_rezerwacja);
+}
+
 bool rezerwujPrzejazdSIPP(Pociag& pociag, const std::vector<uint16_t>& trasa) {
   uint32_t czas = aktualny_czas_symulacji;
+  if (pociag.na_postoju_stacyjnym && pociag.indeks_nastepnego_przystanku > 0) {
+    uint32_t planowy_odjazd = pociag.rozklad[pociag.indeks_nastepnego_przystanku - 1].czas_odjazdu;
+    if (planowy_odjazd > czas) czas = planowy_odjazd;
+  }
+
   std::vector<PlanowanaKrawedz> plan;
   for (size_t indeks = 1; indeks < trasa.size(); indeks++) {
     uint16_t zrodlo = trasa[indeks - 1];
@@ -1381,10 +1592,12 @@ bool rezerwujPrzejazdSIPP(Pociag& pociag, const std::vector<uint16_t>& trasa) {
   }
 
   for (const auto& krawedz : plan) {
-    mapa_sekcji[krawedz.cel].rezerwacje.push_back(
+    dodajRezerwacjeJesliBrak(
+        mapa_sekcji[krawedz.cel].rezerwacje,
         {pociag.id, krawedz.czas_start, krawedz.czas_koniec_sekcji, krawedz.zrodlo, krawedz.cel});
     for (const auto& ustawienie : krawedz.polaczenie->wymagane_zwrotnice) {
-      mapa_zwrotnic[ustawienie.id_zwrotnicy].rezerwacje.push_back(
+      dodajRezerwacjeJesliBrak(
+          mapa_zwrotnic[ustawienie.id_zwrotnicy].rezerwacje,
           {pociag.id, krawedz.czas_start, krawedz.czas_koniec_przejazdu, krawedz.zrodlo, krawedz.cel});
     }
   }
@@ -1407,15 +1620,11 @@ Sygnal sygnalDlaZajetosci(uint16_t sekcja_zrodlowa, uint16_t sekcja_docelowa) {
     }
   }
 
-  // Wjazd na zajeta sekcje za odjezdzajacym skladem jest zolty. Pozwala to
-  // wyhamowac za poprzednim pociagiem, lecz zabrania jazdy z pelna predkoscia.
+  // Zajeta sekcja przez inny pociag nie moze byc celem sygnalu jazdy.
+  // Bez pewnego rozroznienia ruchu za pociagiem od ruchu przeciwnego zolty
+  // sygnal tworzy ryzyko kursu kolizyjnego.
   if (docelowa.zajeta && docelowa.pociag_id != 0) {
-    auto it_pociagu = mapa_pociagow.find(docelowa.pociag_id);
-    if (it_pociagu == mapa_pociagow.end() || it_pociagu->second.czolo == sekcja_docelowa ||
-        it_pociagu->second.czolo == sekcja_zrodlowa) {
-      return Sygnal::CZERWONY;
-    }
-    return Sygnal::ZOLTY;
+    return Sygnal::CZERWONY;
   }
 
   // Pociag znajdujacy sie w sekcji zrodlowej porusza sie poza ta krawedzia.
@@ -1454,7 +1663,7 @@ bool pociagMaRezerwacjePrzejazdu(
         rezerwacja.sekcja_zrodlowa == sekcja_zrodlowa &&
         rezerwacja.sekcja_docelowa == sekcja_docelowa &&
         rezerwacja.czas_start <= aktualny_czas_symulacji &&
-        aktualny_czas_symulacji < rezerwacja.czas_koniec) {
+        aktualny_czas_symulacji < rezerwacja.czas_koniec + ZAPAS_REZERWACJI_S) {
       return true;
     }
   }
@@ -1554,7 +1763,7 @@ void ustawSygnaIStanZwrotnicSIPP() {
     if (it_semafora == mapa_semaforow.end() || it_semafora->second.sygnal == Sygnal::SZ) continue;
     if (it_semafora->second.sygnal != sygnal) {
       it_semafora->second.sygnal = sygnal;
-      ustawSygnal(id_semafora, sygnal == Sygnal::CZERWONY ? "CZE" : sygnal == Sygnal::ZOLTY ? "ZOL" : "ZIE");
+      ustawSygnalJesliNieSZ(id_semafora, sygnal == Sygnal::CZERWONY ? "CZE" : sygnal == Sygnal::ZOLTY ? "ZOL" : "ZIE");
     }
   }
 }
@@ -1562,14 +1771,13 @@ void ustawSygnaIStanZwrotnicSIPP() {
 void przeliczSterowanieSIPP() {
   if (!wszystkieRozkladyZaladowane()) return;
 
-  for (auto& [id, sekcja] : mapa_sekcji) sekcja.rezerwacje.clear();
-  for (auto& [id, zwrotnica] : mapa_zwrotnic) zwrotnica.rezerwacje.clear();
+  oczyscNieaktywneRezerwacje();
 
   std::vector<uint16_t> kolejnosc;
   for (const auto& [id, pociag] : mapa_pociagow) {
     if (!pociag.awaria && pociag.rozklad_zaladowany &&
         pociag.indeks_nastepnego_przystanku < pociag.rozklad.size() &&
-      !pociag.na_postoju_stacyjnym) {
+      !pociag.reczny_postoj) {
       kolejnosc.push_back(id);
     }
   }
@@ -1580,10 +1788,21 @@ void przeliczSterowanieSIPP() {
   // EVT:SEK_WJA moze nadejsc przed odpowiedzia DAT:ROZ. Do czasu wczytania
   // rozkladu nie zmieniaj semaforow ani limitow, aby nie zaplanowac stopu
   // na podstawie niekompletnego stanu sterownika.
-  if (kolejnosc.empty()) return;
+  if (kolejnosc.empty()) {
+    ustawSygnaIStanZwrotnicSIPP();
+    return;
+  }
 
   for (uint16_t id_pociagu : kolejnosc) {
     Pociag& pociag = mapa_pociagow[id_pociagu];
+    usunPrzyszleRezerwacjePociagu(id_pociagu);
+    // zwolnijRezerwacjePociagu(id_pociagu);
+
+    if (zaproponujZmianeKierunkuJesliPotrzebna(pociag)) {
+      wylaczLimitPredkosci(id_pociagu);
+      continue;
+    }
+
     std::vector<uint16_t> trasa;
     bool znaleziona_trasa = znajdzTraseDoPeronu(pociag, trasa);
     bool zarezerwowano = znaleziona_trasa && rezerwujPrzejazdSIPP(pociag, trasa);
@@ -1597,6 +1816,16 @@ void przeliczSterowanieSIPP() {
         Serial.println(pociag.rozklad[pociag.indeks_nastepnego_przystanku].stacja_docelowa);
         if (!znaleziona_trasa) Serial.println("[SIPP] Nie znaleziono trasy do peronu.");
       }
+      if (pociagMaBlokujacySZNaWyjezdzie(pociag)) {
+        if (DEBUG) {
+          Serial.print("[SIPP] Zatrzymuje P");
+          Serial.print(id_pociagu);
+          Serial.println(" przed semaforem SZ.");
+        }
+        zwolnijRezerwacjePociagu(id_pociagu);
+        ustawLimitPredkosci(id_pociagu, 0);
+        continue;
+      }
       // Brak planu nie moze trwale unieruchamiac pociagu. Bezpieczenstwo
       // zapewnia czerwony semafor, a usuniecie limitu pozwala automatyce
       // wznowic ruch od razu po kolejnym poprawnym przeliczeniu SIPP.
@@ -1608,7 +1837,7 @@ void przeliczSterowanieSIPP() {
       najblizszyWolnyCzasSekcji(
         trasa[1], id_pociagu, aktualny_czas_symulacji,
         obliczCzasPrzejazdu(id_pociagu, trasa[0], trasa[1])) > aktualny_czas_symulacji) {
-      ustawLimitPredkosci(id_pociagu, 10);
+      ustawLimitPredkosci(id_pociagu, 40);
     } else {
       wylaczLimitPredkosci(id_pociagu);
     }
@@ -1650,12 +1879,12 @@ void zatrzymajRuchWokolSekcji(uint16_t id_sekcji) {
     if (pociag.czolo == id_sekcji || pociag.ogon == id_sekcji) ustawLimitPredkosci(id_pociagu, 0);
   }
   for (const auto& polaczenie : it->second.polaczenia) {
-    ustawSygnal(polaczenie.id_semafora, "CZE");
+    ustawSygnalJesliNieSZ(polaczenie.id_semafora, "CZE");
   }
   for (const auto& [id_sasiedniej, sasiednia] : mapa_sekcji) {
     for (const auto& polaczenie : sasiednia.polaczenia) {
       if (polaczenie.id_sekcji_docelowej == id_sekcji) {
-        ustawSygnal(polaczenie.id_semafora, "CZE");
+        ustawSygnalJesliNieSZ(polaczenie.id_semafora, "CZE");
       }
     }
   }
@@ -1696,7 +1925,7 @@ void aktualizujStanySemaforow() {
       case Sygnal::ZIELONY: sygnalStr = "ZIE"; break;
       case Sygnal::SZ: sygnalStr = "SZ"; break;
     }
-    ustawSygnal(id, sygnalStr);
+    ustawSygnalJesliNieSZ(id, sygnalStr);
   }
 }
 

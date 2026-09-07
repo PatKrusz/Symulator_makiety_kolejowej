@@ -59,6 +59,7 @@ class MostKomunikacjiUSB:
         "MINUS": "MIN",
     }
     _OPOZNIENIE_ZWROTNICY_S = 5.0
+    _ODSTEP_PO_ZWROTNICY_S = 0.1
 
     def __init__(
         self,
@@ -89,6 +90,7 @@ class MostKomunikacjiUSB:
         self.bufor_komend: List[str] = []
         self.skala_w_metrach = skala_w_metrach
         self.rozmiar_kafelka_w_px = rozmiar_kafelka_px
+        self._ostatni_stan_pauzy: Optional[bool] = None
 
         self._zbuduj_model_sekcji()
 
@@ -427,6 +429,12 @@ class MostKomunikacjiUSB:
         """
         czas = self.zegar.obecny_czas()
 
+        if typ == "pauza_symulacji":
+            self._wyslij_tekst(
+                f"EVT:PAU:{'1' if bool(payload.get('aktywna', False)) else '0'}:{czas}"
+            )
+            return
+
         if typ == "zwrotnica_rozpruta":
             self._wyslij_tekst(
                 f"EVT:AWR:{payload.get('zwrotnica_id', '-')}:"
@@ -460,7 +468,19 @@ class MostKomunikacjiUSB:
             )
             return
 
+        if typ == "pociag_reczny_postoj":
+            self._wyslij_tekst(
+                f"EVT:RSTP:{payload.get('pociag_id', '-')}:{'1' if bool(payload.get('aktywny', False)) else '0'}:{czas}"
+            )
+            return
+
         self._wyslij_tekst(f"EVT:UNK:{typ}:{czas}")
+
+    def zsynchronizuj_pauze(self, aktywna: bool) -> None:
+        if self._ostatni_stan_pauzy == aktywna:
+            return
+        self._ostatni_stan_pauzy = aktywna
+        self.wyslij_zdarzenie("pauza_symulacji", {"aktywna": aktywna})
 
     def wyslij_zdarzenia_symulacji(self, zdarzenia: List[Dict[str, Any]], czas_symulacji: str) -> None:
         """
@@ -758,6 +778,15 @@ class MostKomunikacjiUSB:
                 odpowiedz_error("nieznany_sygnal")
                 return
 
+            if semafor.sygnal == Sygnal.SZ and nowy_sygnal != Sygnal.SZ and not bool(komenda.get("force", False)):
+                payload = {
+                    "semafor_id": id_semafora,
+                    "sygnal": semafor.sygnal.value,
+                }
+                self._odpowiedz_ok_txt("SYG", id_semafora, self._sygnal_do_kodu(semafor.sygnal))
+                self.wyslij_zdarzenie("semafor_zmieniony", payload)
+                return
+
             zmieniony = semafor.sygnal != nowy_sygnal
             semafor.ustaw_sygnal(nowy_sygnal)
             payload = {
@@ -831,6 +860,7 @@ class MostKomunikacjiUSB:
                 "1" if status_czerwony["aktywna"] else "0",
                 str(status_czerwony["semafor_id"]),
                 f"{pociag.predkosc_max_pxs:.3f}",
+                "1" if pociag.wymuszony_postoj else "0",
             )
             return
 
@@ -995,6 +1025,7 @@ class MostKomunikacjiUSB:
                     stacja_nast, self._czas_dla_ramki(czas_przyj), self._czas_dla_ramki(czas_odj), str(czas_postoju or "-"),
                     "1" if status_czerwony["aktywna"] else "0", str(status_czerwony["semafor_id"]),
                     f"{pociag.predkosc_max_pxs:.3f}",
+                    "1" if pociag.wymuszony_postoj else "0",
                 )
             return
 
@@ -1290,6 +1321,7 @@ class MostKomunikacjiUSB:
         """
         Planuje wszystkie wydarzenia z bufora komend USB w zegarze symulacji.
         """
+        najwczesniejszy_sygnal_s = 1.0
         while self.bufor_komend:
             linia = self.bufor_komend.pop(0)
             if config.DEBUG_MODE:
@@ -1300,12 +1332,76 @@ class MostKomunikacjiUSB:
                 continue
 
             if komenda:
+                if self._czy_juz_czeka_taka_sama_komenda_usb(zegar, komenda):
+                    continue
+
                 opoznienie_s = 1.0
                 if komenda.get("cmd") == "set_switch":
                     opoznienie_s += self._OPOZNIENIE_ZWROTNICY_S
+                    najwczesniejszy_sygnal_s = max(
+                        najwczesniejszy_sygnal_s,
+                        opoznienie_s + self._ODSTEP_PO_ZWROTNICY_S,
+                    )
+                elif komenda.get("cmd") == "set_signal":
+                    opoznienie_s = max(
+                        opoznienie_s,
+                        najwczesniejszy_sygnal_s,
+                        self._opoznienie_po_oczekujacych_zwrotnicach(zegar),
+                    )
+                self._usun_oczekujace_komendy_usb(zegar, komenda)
                 zegar.dodaj_wydarzenie(
                     czas_wywolania=zegar.czas_symulacji + datetime.timedelta(seconds=opoznienie_s),
                     akcja=self._wykonaj_komende,
                     parametry=(komenda,),
                     nazwa=f"USB:{komenda.get('cmd', 'UNKNOWN')}"
                 )
+
+    def _czy_juz_czeka_taka_sama_komenda_usb(self, zegar: ZegarSymulacji, nowa_komenda: Dict[str, Any]) -> bool:
+        for wydarzenie in zegar._zaplanowane_wydarzenia:
+            if getattr(wydarzenie, "wykonane", False) or not str(getattr(wydarzenie, "nazwa", "")).startswith("USB:"):
+                continue
+            if not getattr(wydarzenie, "parametry", None):
+                continue
+            poprzednia = wydarzenie.parametry[0]
+            if isinstance(poprzednia, dict) and poprzednia == nowa_komenda:
+                return True
+        return False
+
+    def _opoznienie_po_oczekujacych_zwrotnicach(self, zegar: ZegarSymulacji) -> float:
+        najpozniejsza_zwrotnica = None
+        for wydarzenie in zegar._zaplanowane_wydarzenia:
+            if getattr(wydarzenie, "wykonane", False) or getattr(wydarzenie, "nazwa", "") != "USB:set_switch":
+                continue
+            if najpozniejsza_zwrotnica is None or wydarzenie.czas_symulacji > najpozniejsza_zwrotnica:
+                najpozniejsza_zwrotnica = wydarzenie.czas_symulacji
+
+        if najpozniejsza_zwrotnica is None:
+            return 0.0
+
+        opoznienie = (najpozniejsza_zwrotnica - zegar.czas_symulacji).total_seconds() + self._ODSTEP_PO_ZWROTNICY_S
+        return max(0.0, opoznienie)
+
+    def _usun_oczekujace_komendy_usb(self, zegar: ZegarSymulacji, nowa_komenda: Dict[str, Any]) -> None:
+        cmd = nowa_komenda.get("cmd")
+        if cmd not in {"set_signal", "set_switch", "set_train_limit"}:
+            return
+
+        ident = nowa_komenda.get("id")
+        if not ident:
+            return
+
+        def czy_zastapic(wydarzenie) -> bool:
+            if getattr(wydarzenie, "wykonane", False) or not str(getattr(wydarzenie, "nazwa", "")).startswith("USB:"):
+                return False
+            if not getattr(wydarzenie, "parametry", None):
+                return False
+            poprzednia = wydarzenie.parametry[0]
+            if not isinstance(poprzednia, dict):
+                return False
+            return poprzednia.get("cmd") == cmd and poprzednia.get("id") == ident
+
+        zegar._zaplanowane_wydarzenia = [
+            wydarzenie
+            for wydarzenie in zegar._zaplanowane_wydarzenia
+            if not czy_zastapic(wydarzenie)
+        ]
